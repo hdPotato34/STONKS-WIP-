@@ -1,0 +1,1450 @@
+# Game Design Spec — Whale-Sim
+
+## 1. Build target
+
+A web-based stock-market tactics game inspired by Chinese A-share mechanics.
+
+The player controls a fund/whale across a 30-trading-day run. The goal is to grow assets by trading fictional stocks while manipulating or responding to market sentiment, rival whales, retail herds, quants, news, limit-up boards, liquidity, and regulator heat.
+
+The game is not a realistic finance simulator. It is a deterministic, readable market-behavior simulation.
+
+Use fictional companies only.
+
+---
+
+# 2. Core game parameters
+
+```ts
+const GAME_CONFIG = {
+  totalDays: 30,
+  dayDurationSeconds: 300,
+  ticksPerDay: 300,
+  tickDurationSeconds: 1,
+
+  startingCash: 1_000_000_000,
+  targetNetWorth: 2_500_000_000,
+
+  stockCount: 8,
+
+  mainBoardLimit: 0.10,
+  growthBoardLimit: 0.20,
+  stBoardLimit: 0.05,
+
+  maxAccountHeat: 100,
+  maxStockHeat: 100,
+}
+```
+
+One trading day has 300 ticks. Each tick updates NPC behavior, player orders, price movement, board state, heat, and UI.
+
+---
+
+# 3. Main player loop
+
+Each day follows this structure:
+
+```text
+1. Pre-market
+   - Generate daily news.
+   - Update market and sector sentiment.
+   - Show opening expectations.
+
+2. Opening auction
+   - Player may place initial orders.
+   - NPCs prepare first intentions.
+   - Opening prices are calculated.
+
+3. Intraday trading
+   - 300 ticks.
+   - Player trades and uses influence actions.
+   - NPCs respond to price, news, board state, heat, and player visibility.
+
+4. Closing auction
+   - Final price/queue resolution.
+   - Some whales may defend, dump, or attack.
+
+5. Settlement
+   - Update portfolio.
+   - Unlock T+1 shares.
+   - Apply overnight news decay.
+   - Update heat and regulator events.
+   - Advance to next day.
+```
+
+The player’s repeated tactical questions:
+
+```text
+Can I accumulate before attention arrives?
+Can I push this stock to limit-up?
+Can I defend the board cheaply?
+Can I exit without breaking the board?
+Is another whale using me as exit liquidity?
+Will quants attack the weak board?
+Will the regulator halt the stock?
+```
+
+---
+
+# 4. UI pages
+
+## 4.1 Home
+
+Shows fund-level state.
+
+Required fields:
+
+```text
+Day X / 30
+Cash
+Net Worth
+Realized P&L
+Unrealized P&L
+Account Heat
+Influence
+Reputation
+Current Market Regime
+Current Market Sentiment
+```
+
+## 4.2 Market
+
+Main overview table.
+
+Columns:
+
+```text
+Stock
+Sector
+Board Type
+Price
+Daily Change %
+Board State
+Attention
+Sentiment
+Heat
+Turnover
+Volume
+```
+
+Board states:
+
+```ts
+type BoardState =
+  | "loose"
+  | "attackingLimitUp"
+  | "sealedLimitUp"
+  | "weakSeal"
+  | "brokenBoard"
+  | "panic"
+  | "limitDown"
+```
+
+## 4.3 Stock Detail
+
+Main trading screen for a selected stock.
+
+Required fields:
+
+```text
+Intraday chart
+Price
+Previous close
+Upper limit
+Lower limit
+Buy pressure
+Sell pressure
+Buy queue
+Sell queue
+Board strength
+Retail attention
+Retail fear
+Retail greed
+Sector sentiment
+Active news
+Estimated whale activity
+Estimated quant activity
+Player position
+Sellable shares
+Locked shares
+Average cost
+Liquidity risk
+Stock heat
+```
+
+Required actions:
+
+```text
+Market Buy
+Split Buy
+Market Sell
+Hidden Sell
+Defend Board
+Pull Support
+Push Rumor
+Spread Fear
+Commission Report
+Buy Bear Contract
+```
+
+## 4.4 Portfolio
+
+Shows all holdings.
+
+Fields:
+
+```text
+Stock
+Shares held
+Sellable shares
+T+1 locked shares
+Average cost
+Current price
+Unrealized P&L
+Realized P&L
+Liquidity risk
+Bear contracts
+```
+
+## 4.5 News
+
+Shows active and expired news.
+
+Fields:
+
+```text
+Title
+Scope
+Affected sector/stock
+Polarity
+Strength
+Credibility
+Duration remaining
+Heat impact
+```
+
+## 4.6 End Screen
+
+Show:
+
+```text
+Final net worth
+Realized profit
+Unrealized profit
+Max account heat
+Stocks halted
+Best trade
+Worst trade
+Final grade
+```
+
+---
+
+# 5. Core data models
+
+## 5.1 GameState
+
+```ts
+type GameState = {
+  day: number
+  tick: number
+  phase: "preMarket" | "openingAuction" | "intraday" | "closingAuction" | "settlement" | "ended"
+
+  rngSeed: string
+
+  market: MarketState
+  sectors: Record<SectorId, SectorState>
+  stocks: Record<StockId, Stock>
+  player: PlayerFund
+  news: NewsItem[]
+  whales: Whale[]
+  regulator: RegulatorState
+  eventLog: GameEvent[]
+}
+```
+
+## 5.2 MarketState
+
+```ts
+type MarketState = {
+  regime: "bull" | "bear" | "choppy"
+  sentiment: number // 0-100
+  liquidity: number // 0-100
+  volatility: number // 0-100
+  regulatorStrictness: number // 0-100
+}
+```
+
+## 5.3 SectorState
+
+```ts
+type SectorState = {
+  id: SectorId
+  name: string
+  sentiment: number // 0-100
+  attention: number // 0-100
+  momentum: number // -100 to 100
+  activeModifiers: Modifier[]
+}
+```
+
+Suggested sectors:
+
+```text
+AI / Tech
+Biotech
+Property
+Consumer
+Resources
+Finance
+Defense
+Energy
+```
+
+## 5.4 Stock
+
+```ts
+type Stock = {
+  id: StockId
+  name: string
+  sector: SectorId
+  boardType: "main" | "growth" | "st"
+
+  price: number
+  previousClose: number
+  open: number
+  high: number
+  low: number
+
+  marketCap: number
+  floatShares: number
+  baseLiquidity: number
+  currentLiquidity: number
+  turnover: number
+  volume: number
+
+  pe: number
+  financialHealth: number // 0-100
+
+  sentiment: number // 0-100
+  attention: number // 0-100
+  momentum: number // -100 to 100
+
+  heat: number // 0-100
+
+  buyQueue: number
+  sellQueue: number
+  boardStrength: number // 0-100
+  boardState: BoardState
+
+  retail: RetailProfile
+  quantPresence: number // 0-100
+  institutionPresence: number // 0-100
+
+  avgHolderCost: number
+  costDistribution: CostDistribution
+
+  activeModifiers: Modifier[]
+
+  chart: TickPrice[]
+}
+```
+
+## 5.5 PlayerFund
+
+```ts
+type PlayerFund = {
+  cash: number
+  netWorth: number
+  realizedPnl: number
+  unrealizedPnl: number
+
+  influence: number
+  reputation: number
+  accountHeat: number
+
+  positions: Record<StockId, Position>
+  activeOrders: Order[]
+  bearContracts: BearContract[]
+}
+```
+
+## 5.6 Position
+
+```ts
+type Position = {
+  stockId: StockId
+  totalShares: number
+  sellableShares: number
+  lockedShares: number
+  avgCost: number
+  realizedPnl: number
+}
+```
+
+T+1 rule:
+
+```ts
+// Shares bought today become lockedShares.
+// At settlement, lockedShares become sellableShares.
+```
+
+## 5.7 Order
+
+```ts
+type Order = {
+  id: string
+  owner: "player" | "whale"
+  stockId: StockId
+  side: "buy" | "sell"
+  style: "market" | "split" | "hidden" | "support" | "pullSupport"
+  amountCash?: number
+  shares?: number
+  remainingTicks?: number
+  visibility: number // 0-100
+  heatImpact: number
+}
+```
+
+---
+
+# 6. Player actions
+
+## 6.1 Market Buy
+
+Immediate visible buy pressure.
+
+```text
+Effect:
+- Converts cash into shares.
+- Raises price pressure.
+- Raises player visibility.
+- Raises account heat and stock heat.
+
+Use:
+- Push price quickly.
+- Attack limit-up.
+```
+
+## 6.2 Split Buy
+
+Gradual accumulation over several ticks.
+
+```text
+Effect:
+- Lower price impact per tick.
+- Lower visibility.
+- Lower heat.
+- Can be interrupted by price moving away.
+
+Use:
+- Accumulate before news or pump.
+```
+
+## 6.3 Market Sell
+
+Immediate visible sell pressure.
+
+```text
+Effect:
+- Sells sellable shares.
+- Can break weak boards.
+- Raises visibility if large.
+
+Use:
+- Exit fast.
+- Attack rival board.
+```
+
+## 6.4 Hidden Sell
+
+Gradual exit.
+
+```text
+Effect:
+- Lower visible sell pressure.
+- Lower chance of immediate board break.
+- May fail if liquidity dries.
+
+Use:
+- Exit while retail demand is strong.
+```
+
+## 6.5 Defend Board
+
+Adds support to buy queue when price is at or near limit-up.
+
+```text
+Effect:
+- Increases board strength.
+- Attracts retail confidence.
+- Consumes cash or reserves it as support.
+- Raises heat if excessive.
+
+Use:
+- Keep limit-up sealed.
+```
+
+## 6.6 Pull Support
+
+Cancels previous support.
+
+```text
+Effect:
+- Frees reserved cash.
+- Reduces board strength.
+- Can trigger panic if detected.
+- Raises heat and suspicion.
+
+Use:
+- Escape before collapse.
+```
+
+## 6.7 Push Rumor
+
+Influence action.
+
+```text
+Effect:
+- Raises stock or sector attention.
+- Raises retail greed.
+- Raises heat.
+- Has chance of later clarification/backfire.
+
+Use:
+- Create momentum.
+```
+
+## 6.8 Spread Fear
+
+Influence action.
+
+```text
+Effect:
+- Raises fear.
+- Raises sell pressure.
+- Weakens board strength.
+- Strong effect on fragile stocks.
+
+Use:
+- Break rival pumps.
+- Profit from bear contracts.
+```
+
+## 6.9 Commission Report
+
+Influence action.
+
+```text
+Effect:
+- Slower than rumor.
+- Raises sentiment and institutional interest.
+- Lower heat than rumor.
+
+Use:
+- Safer long setup.
+```
+
+## 6.10 Buy Bear Contract
+
+Simplified short exposure.
+
+```ts
+type BearContract = {
+  stockId: StockId
+  notional: number
+  entryPrice: number
+  expiryDay: number
+  premiumPaid: number
+}
+```
+
+Profit increases when stock falls. Premium is higher when fear is already high.
+
+---
+
+# 7. Price engine
+
+Every tick, each stock calculates buy pressure and sell pressure.
+
+```ts
+buyPressure =
+  playerBuyPressure
+  + retailBuyPressure
+  + whaleBuyPressure
+  + quantBuyPressure
+  + institutionBuyPressure
+  + newsBuyPressure
+  + noise
+
+sellPressure =
+  playerSellPressure
+  + retailSellPressure
+  + whaleSellPressure
+  + quantSellPressure
+  + institutionSellPressure
+  + panicSellPressure
+  + noise
+```
+
+Price impact:
+
+```ts
+imbalance = buyPressure - sellPressure
+rawImpact = imbalance / stock.currentLiquidity
+priceDelta = rawImpact * volatilityMultiplier
+```
+
+Clamp by daily limit:
+
+```ts
+upperLimit = stock.previousClose * (1 + limitRatio)
+lowerLimit = stock.previousClose * (1 - limitRatio)
+
+stock.price = clamp(stock.price + priceDelta, lowerLimit, upperLimit)
+```
+
+Limit ratio:
+
+```ts
+function getLimitRatio(stock: Stock): number {
+  if (stock.boardType === "growth") return 0.20
+  if (stock.boardType === "st") return 0.05
+  return 0.10
+}
+```
+
+---
+
+# 8. Limit-up board logic
+
+When stock reaches upper limit, extra buy pressure becomes buy queue.
+
+```ts
+if (stock.price >= upperLimit) {
+  stock.buyQueue += Math.max(0, buyPressure - sellPressure)
+  stock.sellQueue += Math.max(0, sellPressure - buyPressure)
+}
+```
+
+Board strength:
+
+```ts
+boardStrength =
+  buyQueue / (buyQueue + sellPressureForecast + hiddenExitRisk + 1)
+```
+
+Normalize to 0–100.
+
+Board state rules:
+
+```ts
+if (price <= lowerLimit) {
+  boardState = "limitDown"
+} else if (price < upperLimit * 0.97) {
+  boardState = "loose"
+} else if (price < upperLimit) {
+  boardState = "attackingLimitUp"
+} else if (boardStrength >= 65) {
+  boardState = "sealedLimitUp"
+} else if (boardStrength >= 35) {
+  boardState = "weakSeal"
+} else {
+  boardState = "brokenBoard"
+}
+```
+
+Effects:
+
+```text
+sealedLimitUp:
+- Increases retail greed.
+- Increases attention.
+- Reduces available sell liquidity.
+- Raises stock heat.
+
+weakSeal:
+- Attracts quant attacks.
+- Raises fear.
+- Increases hidden sell risk.
+
+brokenBoard:
+- Triggers panic selling.
+- Damages sentiment.
+- May expose whale/player manipulation.
+```
+
+---
+
+# 9. Retail herd simulation
+
+Retail is aggregated per stock. Do not simulate individuals.
+
+```ts
+type RetailProfile = {
+  momentum: number
+  dipBuyers: number
+  newsFollowers: number
+  gamblers: number
+  bagholders: number
+  panicSellers: number
+
+  greed: number
+  fear: number
+  attention: number
+  boardFaith: number
+}
+```
+
+Retail pressure:
+
+```ts
+retailBuy =
+  momentum * positiveMomentum
+  + dipBuyers * dipAttractiveness
+  + newsFollowers * relevantNewsStrength
+  + gamblers * boardHype
+  + bagholders * supportBias
+
+retailSell =
+  panicSellers * fear
+  + momentum * negativeMomentum
+  + bagholders * costPain
+  + gamblers * brokenBoardFear
+```
+
+Composition changes:
+
+```text
+Strong sealed board:
++ momentum
++ gamblers
++ boardFaith
+- panicSellers
+
+Weak seal:
++ gamblers
++ panicSellers
+- boardFaith
+
+Broken board:
++ panicSellers
+- gamblers
+- momentum
+
+Limit down:
++ panicSellers
++ bagholders
+- momentum
+```
+
+Cost pain:
+
+```ts
+costPain = Math.max(0, stock.avgHolderCost - stock.price) / stock.avgHolderCost
+```
+
+Profit confidence:
+
+```ts
+profitConfidence = Math.max(0, stock.price - stock.avgHolderCost) / stock.avgHolderCost
+```
+
+Cost pain increases sell pressure. Profit confidence increases board faith until profit-taking becomes attractive.
+
+---
+
+# 10. Quant simulation
+
+Quants are not individually visible. Each stock has `quantPresence`.
+
+Quants react to:
+
+```text
+Momentum
+Mean reversion
+Weak boards
+News surprise
+Player visibility
+Overextended price
+```
+
+Quant signal:
+
+```ts
+quantSignal =
+  momentumWeight * stock.momentum
+  - meanReversionWeight * deviationFromAverage
+  - weakBoardWeight * weakBoardSignal
+  + newsWeight * newsSurprise
+```
+
+Behavior:
+
+```ts
+if (quantSignal > 0) {
+  quantBuyPressure = stock.quantPresence * quantSignal
+} else {
+  quantSellPressure = stock.quantPresence * Math.abs(quantSignal)
+}
+```
+
+Special rule:
+
+```text
+If boardState === "weakSeal" and quantPresence is high:
+- quants increase sell pressure.
+- quants may trigger board break.
+```
+
+UI should not show exact quant values. Show estimates:
+
+```text
+No clear quant activity
+Fast money suspected
+Algorithmic selling rising
+Quant attack likely
+```
+
+---
+
+# 11. Whale simulation
+
+Whales are individually simulated. Keep 8–12 total across the market.
+
+```ts
+type Whale = {
+  id: string
+  name: string
+  archetype: WhaleArchetype
+
+  cash: number
+  positions: Record<StockId, number>
+
+  aggression: number
+  patience: number
+  riskTolerance: number
+  heatTolerance: number
+
+  preferredCaps: MarketCapClass[]
+  preferredSectors: SectorId[]
+
+  targetStockId?: StockId
+  intention: WhaleIntention
+}
+```
+
+```ts
+type WhaleArchetype =
+  | "pumpLord"
+  | "quantKnife"
+  | "valueWall"
+  | "rescueWhale"
+  | "bagholderWhale"
+
+type WhaleIntention =
+  | "idle"
+  | "accumulate"
+  | "pump"
+  | "defend"
+  | "dump"
+  | "attack"
+```
+
+## Pump Lord
+
+```text
+Targets small/mid caps.
+Accumulates quietly when attention is low.
+Pumps when momentum appears.
+Defends strong limit-up boards.
+Dumps after 2–3 strong days or high heat.
+```
+
+## Quant Knife
+
+```text
+Attacks weak boards.
+Sells overextended stocks.
+Buys panic reversals.
+Punishes visible player support.
+```
+
+## Value Wall
+
+```text
+Large institutional seller.
+Sells into extreme rallies.
+Buys quality stocks during panic.
+Ignores rumors.
+```
+
+## Rescue Whale
+
+```text
+Supports large-cap or state-linked stocks during severe market weakness.
+Rarely touches small caps.
+```
+
+## Bagholder Whale
+
+```text
+Already trapped in a stock.
+Creates fake support to attract exit liquidity.
+Dumps into strong retail demand.
+```
+
+Whale decision input:
+
+```ts
+type WhaleFeatures = {
+  priceChange: number
+  momentum: number
+  deviationFromAverage: number
+  marketCap: number
+  liquidity: number
+  boardStrength: number
+  retailAttention: number
+  sectorSentiment: number
+  newsStrength: number
+  stockHeat: number
+  playerVisibility: number
+}
+```
+
+Whales produce aggregate pressure orders each tick.
+
+---
+
+# 12. News and modifiers
+
+News modifies agent behavior. It should not directly set price.
+
+```ts
+type NewsItem = {
+  id: string
+  title: string
+  source: "market" | "policy" | "financialReport" | "rumor" | "clarification"
+  scope: "market" | "sector" | "stock"
+  targetId?: string
+
+  polarity: -1 | 0 | 1
+  strength: number // 0-100
+  credibility: number // 0-100
+  durationDays: number
+  remainingDays: number
+
+  tags: string[]
+  heatImpact: number
+}
+```
+
+News effects:
+
+```text
+Positive news:
++ sentiment
++ attention
++ retail buy pressure
++ sector momentum
+
+Negative news:
+- sentiment
++ fear
++ sell pressure
++ bear contract demand
+
+Policy news:
+large sector or market effect
+
+Financial report:
+affects financialHealth, institution interest, and valuation resistance
+
+Clarification:
+reduces credibility of prior rumor
+raises fear
+raises heat if player pushed rumor
+```
+
+Each day generate 3–5 news items.
+
+---
+
+# 13. Heat and regulator system
+
+There are two heat meters:
+
+```text
+Stock Heat
+Account Heat
+```
+
+Stock heat tracks abnormal activity in a specific stock.
+Account heat tracks suspicious player behavior.
+
+Heat increases from:
+
+```text
+Large visible orders
+Repeated limit-up days
+Player volume share too high
+Rumor usage
+Pump then hidden sell
+Pulling board support
+Bear contract plus fear campaign
+Abnormal 10-day or 30-day return
+```
+
+Heat effects:
+
+```text
+0–30:
+Safe.
+
+31–60:
+Warnings. Higher volatility. More rumor clarification risk.
+
+61–80:
+Exchange inquiry. Halt chance. NPCs become cautious.
+
+81–100:
+Trading halt, account restriction, forced disclosure, or run-ending investigation.
+```
+
+Regulator events:
+
+```ts
+type RegulatorEvent =
+  | "warning"
+  | "inquiryLetter"
+  | "rumorClarification"
+  | "tradingHalt"
+  | "accountRestriction"
+  | "investigation"
+```
+
+Regulator principle:
+
+```text
+Profit is not punished directly.
+Obvious manipulation is punished.
+```
+
+---
+
+# 14. Liquidity model
+
+Liquidity changes constantly.
+
+```ts
+currentLiquidity =
+  baseLiquidity
+  * marketLiquidityModifier
+  * attentionModifier
+  * boardStateModifier
+  * panicModifier
+```
+
+Guidelines:
+
+```text
+High attention:
++ volume
++ volatility
+
+Sealed limit-up:
+- actual sell liquidity
++ visible buy queue
+
+Weak seal:
++ instability
++ quant activity
+
+Panic:
+- buy liquidity
++ sell pressure
+
+Limit down:
+almost no buy liquidity
+```
+
+Liquidity risk should be displayed to the player.
+
+---
+
+# 15. Cost distribution
+
+Each stock tracks holder cost distribution.
+
+```ts
+type CostDistribution = {
+  deepProfit: number
+  profit: number
+  nearCost: number
+  loss: number
+  deepLoss: number
+}
+```
+
+Use it to calculate:
+
+```text
+Profit-taking risk
+Panic risk
+Support strength
+Resistance
+Board faith
+```
+
+Rules:
+
+```text
+Many holders in profit:
+- More potential sell pressure near limit-up.
+
+Many holders near cost:
+- Strong resistance around average cost.
+
+Many holders in loss:
+- Higher panic risk during decline.
+- Lower willingness to sell during mild decline.
+- Higher capitulation during crash.
+```
+
+---
+
+# 16. Chart representation
+
+Use simplified intraday charts. Full candlestick accuracy is not required.
+
+Track tick prices and board events.
+
+Chart labels:
+
+```text
+Flat board:
+Limit-up reached early and stayed sealed.
+
+T-shape board:
+Limit-up sealed, broke briefly, resealed.
+
+Solid candle:
+Strong upward trend without stable seal.
+
+Long upper wick:
+Failed pump.
+
+Waterfall:
+Fast panic decline.
+
+Death board:
+Limit-down lock.
+```
+
+These labels should be generated from price path and board state history.
+
+---
+
+# 17. Daily settlement
+
+At end of day:
+
+```ts
+function settleDay(game: GameState) {
+  for each stock:
+    stock.previousClose = stock.price
+    decayStockSentiment(stock)
+    decayAttention(stock)
+    decayHeat(stock)
+    updateAvgHolderCost(stock)
+    updateCostDistribution(stock)
+    clearIntradayOrders(stock)
+
+  for each player position:
+    position.sellableShares += position.lockedShares
+    position.lockedShares = 0
+
+  expireNews(game)
+  expireBearContracts(game)
+  updateWhaleLongTermIntentions(game)
+  processRegulatorEvents(game)
+  recalculatePlayerNetWorth(game)
+
+  game.day += 1
+  game.tick = 0
+}
+```
+
+---
+
+# 18. Main tick update
+
+Codex should implement one central update pipeline.
+
+```ts
+function updateTick(game: GameState, playerActions: PlayerAction[]) {
+  applyPlayerActions(game, playerActions)
+
+  updateActiveModifiers(game)
+  updateMarketSentiment(game)
+  updateSectorStates(game)
+
+  for (const stock of Object.values(game.stocks)) {
+    updateStockDerivedMetrics(stock, game)
+
+    updateRetailProfile(stock, game)
+    updateWhaleIntentions(stock, game)
+    updateQuantPressure(stock, game)
+
+    const pressure = calculatePressure(stock, game)
+
+    updateLiquidity(stock, game, pressure)
+    updatePrice(stock, game, pressure)
+    updateBoardState(stock, game, pressure)
+    updateHeat(stock, game, pressure)
+    updateChart(stock, game)
+  }
+
+  updatePlayerPortfolio(game)
+  updateRegulatorState(game)
+  appendImportantEvents(game)
+
+  game.tick += 1
+}
+```
+
+---
+
+# 19. Required event log
+
+The market should explain itself through short events.
+
+Examples:
+
+```text
+DragonSoft sealed limit-up.
+DragonSoft board weakened.
+Quant selling suspected in DragonSoft.
+Pump Lord defended DragonSoft.
+Board broke in DragonSoft.
+Retail panic spreading in Property sector.
+Exchange issued inquiry letter to New Horizon Bio.
+Player support order detected by market.
+```
+
+Event logs make the simulation readable.
+
+---
+
+# 20. Content requirements
+
+Ship with 8 fictional stocks.
+
+Required archetypes:
+
+```text
+Small-cap Tech Story
+Biotech Rumor Stock
+Property Distress Stock
+Consumer Blue Chip
+Resource Cyclical
+State-Owned Bank
+Defense Speculation Stock
+Energy Infrastructure Stock
+```
+
+Each stock needs:
+
+```text
+Name
+Sector
+Board type
+Market cap
+Float shares
+Base liquidity
+PE
+Financial health
+Retail composition
+Institution presence
+Quant presence
+Initial sentiment
+Initial average holder cost
+Cost distribution
+```
+
+Ship with at least 50 news templates.
+
+News categories:
+
+```text
+Policy
+Sector rumor
+Company rumor
+Financial report
+Clarification
+Market-wide sentiment
+Regulatory warning
+Institutional report
+```
+
+Ship with 8–12 whales.
+
+---
+
+# 21. Balance principles
+
+Use these as tuning rules:
+
+```text
+Small caps should be easy to move and hard to exit.
+
+Large caps should be hard to manipulate but safer to park capital in.
+
+Limit-up should feel powerful but fragile.
+
+T+1 should make commitment matter.
+
+Retail should amplify trends but panic violently.
+
+Quants should punish weak, crowded, obvious trades.
+
+Whales should sometimes cooperate accidentally and sometimes betray the player.
+
+Heat should punish visible manipulation, not ordinary trading.
+
+News should create opportunity, not decide outcomes by itself.
+
+The player should often win by exiting well, not just entering well.
+```
+
+---
+
+# 22. Non-goals
+
+Do not build:
+
+```text
+Real companies
+Real political names
+Full order book simulation
+Full accounting statements
+Realistic options/derivatives
+Complex technical indicators as core logic
+Multiplayer
+Backend economy
+Real-money mechanics
+Exact legal/regulatory simulation
+```
+
+Technical indicators such as MACD/KDJ may appear as flavor, but NPCs should react to simplified derived signals:
+
+```text
+Momentum
+Deviation from average
+Board strength
+Attention
+Sentiment
+Heat
+Liquidity
+```
+
+---
+
+# 23. Technical assumptions
+
+Recommended stack:
+
+```text
+TypeScript
+React
+Local state store: Zustand or Redux
+Canvas/SVG/simple DOM charts
+No backend required
+Seeded RNG for replayable runs
+LocalStorage save/load
+```
+
+Simulation should be deterministic given:
+
+```text
+rngSeed
+initial game state
+player action history
+```
+
+This makes debugging and balancing easier.
+
+---
+
+# 24. Success criteria
+
+The shipped game is working when:
+
+```text
+A player can complete a 30-day run.
+
+Stocks move according to pressure, liquidity, news, and NPC behavior.
+
+Limit-up and limit-down mechanics work.
+
+T+1 inventory locking works.
+
+Retail herd behavior visibly changes based on board state, news, price, and fear.
+
+Whales make distinct strategic decisions.
+
+Quants punish weak/crowded moves without being directly visible.
+
+News affects sentiment, attention, and NPC behavior.
+
+Heat creates regulator consequences.
+
+Player actions can create, defend, exploit, or break limit-up boards.
+
+The player can win, lose, get trapped in illiquid holdings, or get punished by heat.
+
+The event log explains major market moves clearly enough that outcomes feel legible.
+```
+
+---
+
+# 25. Core implementation priority inside the codebase
+
+The game should be built around these modules:
+
+```text
+/game
+  gameState.ts
+  config.ts
+  rng.ts
+
+/simulation
+  tick.ts
+  priceEngine.ts
+  boardEngine.ts
+  retailEngine.ts
+  whaleEngine.ts
+  quantEngine.ts
+  newsEngine.ts
+  heatEngine.ts
+  settlement.ts
+
+/player
+  actions.ts
+  portfolio.ts
+  orders.ts
+
+/content
+  stocks.ts
+  newsTemplates.ts
+  whales.ts
+  sectors.ts
+
+/ui
+  HomePage.tsx
+  MarketPage.tsx
+  StockDetailPage.tsx
+  PortfolioPage.tsx
+  NewsPage.tsx
+  EndScreen.tsx
+  components/
+```
