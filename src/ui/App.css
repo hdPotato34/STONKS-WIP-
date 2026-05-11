@@ -64,9 +64,9 @@ button:disabled {
 
 .topbar {
   display: grid;
-  grid-template-columns: 250px minmax(160px, 210px) 330px minmax(270px, 1fr) auto;
+  grid-template-columns: 228px minmax(140px, 190px) minmax(260px, 310px) minmax(360px, 1fr) auto;
   align-items: stretch;
-  gap: 12px;
+  gap: 10px;
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -137,6 +137,10 @@ button:disabled {
   font-weight: 820;
 }
 
+.whale-index .tone-flat {
+  color: var(--text) !important;
+}
+
 .main-nav {
   display: flex;
   align-items: stretch;
@@ -145,8 +149,8 @@ button:disabled {
 
 .main-nav button {
   position: relative;
-  min-width: 104px;
-  padding: 0 16px;
+  min-width: 86px;
+  padding: 0 12px;
   color: var(--muted);
   background: transparent;
   font-weight: 620;
@@ -169,11 +173,12 @@ button:disabled {
 
 .clock-block {
   display: grid;
-  grid-template-columns: auto minmax(120px, 260px) auto;
+  grid-template-columns: minmax(72px, auto) minmax(150px, 1fr) minmax(86px, auto);
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  min-width: 0;
+  justify-content: stretch;
+  gap: 10px;
+  min-width: 340px;
+  padding: 0 4px;
 }
 
 .clock-item {
@@ -240,7 +245,7 @@ button:disabled {
   display: flex;
   align-items: center;
   min-width: 150px;
-  max-width: 280px;
+  max-width: none;
 }
 
 .progress-with-skip .progress {
@@ -278,7 +283,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
+  min-width: max-content;
 }
 
 .icon-button {
@@ -296,6 +302,50 @@ button:disabled {
   color: #ffffff;
   border-color: var(--ink);
   background: var(--ink);
+}
+
+.autosave-status {
+  display: grid;
+  grid-template-columns: minmax(70px, 100px) auto auto;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 5px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.autosave-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autosave-status.loaded {
+  color: var(--ink);
+}
+
+.autosave-status.saved {
+  color: var(--down);
+}
+
+.autosave-status.error {
+  color: var(--heat);
+}
+
+.autosave-status button {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 720;
 }
 
 .speed-control {
@@ -510,12 +560,30 @@ button:disabled {
   font-weight: 820;
 }
 
-.simple-market-price span.tone-up {
+.simple-market-price.up strong {
+  color: var(--up);
+}
+
+.simple-market-price.down strong {
+  color: var(--down);
+}
+
+.simple-market-price.flat strong {
+  color: var(--text);
+}
+
+.simple-market-price.up span {
   background: var(--up);
 }
 
-.simple-market-price span.tone-down {
+.simple-market-price.down span {
   background: var(--down);
+}
+
+.simple-market-price.flat span {
+  color: var(--text) !important;
+  border: 1px solid #dde4dd;
+  background: #f6f8f5;
 }
 
 .mini-sparkline {
@@ -1008,6 +1076,10 @@ button:disabled {
 
 .chart-hover-layer text:last-child {
   fill: #7b8580;
+}
+
+.kline-hover-layer text {
+  font-size: 8.5px;
 }
 
 .trade-mark-toggle {
@@ -1583,6 +1655,30 @@ button:disabled {
 
 .tone-heat {
   color: var(--heat) !important;
+}
+
+@media (max-width: 1380px) {
+  .topbar {
+    grid-template-columns: 210px minmax(130px, 170px) minmax(250px, 280px) minmax(340px, 1fr) auto;
+    gap: 8px;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .main-nav button {
+    min-width: 78px;
+    padding: 0 10px;
+  }
+
+  .autosave-status {
+    grid-template-columns: auto auto;
+  }
+
+  .autosave-status span {
+    display: none;
+  }
 }
 
 @media (max-width: 1180px) {

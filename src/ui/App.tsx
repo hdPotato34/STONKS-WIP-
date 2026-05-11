@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, BarChart3, ChevronsRight, Pause, Play, RefreshCw, SkipForward, Star, Wallet } from "lucide-react";
+import { Activity, BarChart3, ChevronsRight, Pause, Play, RefreshCw, Star, Wallet } from "lucide-react";
 import { GAME_CONFIG, roundMoney } from "../game/config";
 import { createInitialGame } from "../game/createInitialGame";
 import { getValuationSnapshot } from "../game/fundamentals";
-import type { BoardState, DailyCandle, GameState, PlayerAction, Stock, StockId, TickPrice, TickResult } from "../game/types";
+import type { BoardState, DailyCandle, ExecutionFill, GameState, PlayerAction, Stock, StockId, TickPrice, TickResult } from "../game/types";
 import { getLowerLimit, getUpperLimit } from "../simulation/boardEngine";
 import { createMarketDepth } from "../simulation/marketDepth";
 import { calculateEffectiveDepth, getMarketCapClass } from "../simulation/marketDepth";
@@ -15,6 +15,7 @@ type TradeSide = "buy" | "sell";
 type NavPage = "market" | "fundamentals" | "portfolio";
 type KLineRange = 5 | 20 | 60 | "all";
 type KLineAxisMode = "auto" | "pct10" | "pct20";
+type MarketTone = "up" | "down" | "flat";
 type StockTraceView = TickResult["stocks"][number];
 type TradeMark = {
   side: "buy" | "sell";
@@ -32,6 +33,26 @@ type ChartHover = {
   coordPrice: number;
   point: TickPrice;
 };
+type PlayerFillRecord = {
+  day: number;
+  tick: number;
+  fill: ExecutionFill;
+};
+type DailyTradeMark = {
+  side: "buy" | "sell";
+  day: number;
+  price: number;
+  shares: number;
+  notional: number;
+  count: number;
+};
+type KLineHover = {
+  x: number;
+  y: number;
+  coordPrice: number;
+  candle: DailyCandle;
+  index: number;
+};
 type FastForwardState = {
   active: boolean;
   startDay: number;
@@ -41,6 +62,7 @@ type WhaleIndexSnapshot = {
   value: number;
   change: number;
   changePct: number;
+  tone: MarketTone;
 };
 type WhaleFeedRow = {
   key: string;
@@ -53,6 +75,28 @@ type WhaleFeedRow = {
   avgPrice: number;
   intention: string;
 };
+type SaveStatus = {
+  label: string;
+  tone: "saved" | "loaded" | "error" | "empty";
+};
+type AutosaveFile = {
+  version: 1;
+  savedAt: string;
+  game: GameState;
+  ui: {
+    selectedStockId: StockId;
+    tickIntervalSeconds: number;
+    kLineRange: KLineRange;
+    kLineAxisMode: KLineAxisMode;
+    navPage: NavPage;
+    showTradeMarks: boolean;
+    simpleMarketMode: boolean;
+    indexBaseValue: number;
+    playerFillHistory: PlayerFillRecord[];
+  };
+};
+
+const AUTOSAVE_KEY = "whale-sim:auto-save:v1";
 
 const stockIds: StockId[] = [
   "DRAGON_SOFT",
@@ -66,27 +110,41 @@ const stockIds: StockId[] = [
 ];
 
 export function App() {
-  const gameRef = useRef<GameState>(createInitialUiGame("web-mvp"));
-  const indexBaseValueRef = useRef(calculateWeightedMarketValue(gameRef.current));
+  const [initialSave] = useState(() => readAutosave());
+  const gameRef = useRef<GameState>(initialSave?.game ?? createInitialUiGame("web-mvp"));
+  const indexBaseValueRef = useRef(initialSave?.ui.indexBaseValue ?? calculateWeightedMarketValue(gameRef.current));
   const [, setGameVersion] = useState(0);
   const game = gameRef.current;
-  const [selectedStockId, setSelectedStockId] = useState<StockId>("DRAGON_SOFT");
+  const [selectedStockId, setSelectedStockId] = useState<StockId>(() => getInitialStockId(initialSave, gameRef.current));
   const [recentResults, setRecentResults] = useState<TickResult[]>([]);
+  const [playerFillHistory, setPlayerFillHistory] = useState<PlayerFillRecord[]>(() => initialSave?.ui.playerFillHistory ?? []);
   const [pendingActions, setPendingActions] = useState<PlayerAction[]>([]);
-  const [running, setRunning] = useState(true);
-  const [tickIntervalSeconds, setTickIntervalSeconds] = useState<number>(GAME_CONFIG.tickDurationSeconds);
+  const [running, setRunning] = useState(() => !initialSave);
+  const [tickIntervalSeconds, setTickIntervalSeconds] = useState<number>(() => initialSave?.ui.tickIntervalSeconds ?? GAME_CONFIG.tickDurationSeconds);
   const [fastForward, setFastForward] = useState<FastForwardState>({ active: false, startDay: 0, restoreRunning: true });
-  const [kLineRange, setKLineRange] = useState<KLineRange>(20);
-  const [kLineAxisMode, setKLineAxisMode] = useState<KLineAxisMode>("auto");
+  const [kLineRange, setKLineRange] = useState<KLineRange>(() => initialSave?.ui.kLineRange ?? 20);
+  const [kLineAxisMode, setKLineAxisMode] = useState<KLineAxisMode>(() => initialSave?.ui.kLineAxisMode ?? "auto");
   const [tradeSide, setTradeSide] = useState<TradeSide>("buy");
-  const [showTradeMarks, setShowTradeMarks] = useState(false);
-  const [simpleMarketMode, setSimpleMarketMode] = useState(false);
+  const [showTradeMarks, setShowTradeMarks] = useState(() => initialSave?.ui.showTradeMarks ?? false);
+  const [simpleMarketMode, setSimpleMarketMode] = useState(() => initialSave?.ui.simpleMarketMode ?? false);
   const [quantity, setQuantity] = useState("10000");
   const [limitPrice, setLimitPrice] = useState(() => gameRef.current.stocks.DRAGON_SOFT.price.toFixed(2));
-  const [navPage, setNavPage] = useState<NavPage>("market");
+  const [navPage, setNavPage] = useState<NavPage>(() => initialSave?.ui.navPage ?? "market");
   const [ticketMessage, setTicketMessage] = useState("");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>(() =>
+    initialSave
+      ? {
+          label: `Loaded autosave ${formatSaveTime(initialSave.savedAt)}`,
+          tone: "loaded"
+        }
+      : {
+          label: "No autosave yet",
+          tone: "empty"
+        }
+  );
   const pendingActionsRef = useRef<PlayerAction[]>([]);
   const fastForwardRef = useRef<FastForwardState>(fastForward);
+  const playerFillHistoryRef = useRef<PlayerFillRecord[]>(playerFillHistory);
 
   const selectedStock = game.stocks[selectedStockId];
   const whaleIndex = calculateWhaleIndex(game, indexBaseValueRef.current);
@@ -106,15 +164,77 @@ export function App() {
     fastForwardRef.current = fastForward;
   }, [fastForward]);
 
+  useEffect(() => {
+    playerFillHistoryRef.current = playerFillHistory;
+  }, [playerFillHistory]);
+
+  const writeCurrentAutosave = useCallback((showStatus = false) => {
+    const success = writeAutosave({
+      game: gameRef.current,
+      selectedStockId,
+      tickIntervalSeconds,
+      kLineRange,
+      kLineAxisMode,
+      navPage,
+      showTradeMarks,
+      simpleMarketMode,
+      indexBaseValue: indexBaseValueRef.current,
+      playerFillHistory: playerFillHistoryRef.current
+    });
+    if (showStatus) {
+      setSaveStatus(
+        success
+          ? { label: `Autosaved D${gameRef.current.day} T${gameRef.current.tick}`, tone: "saved" }
+          : { label: "Autosave failed", tone: "error" }
+      );
+    }
+  }, [kLineAxisMode, kLineRange, navPage, selectedStockId, showTradeMarks, simpleMarketMode, tickIntervalSeconds]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => writeCurrentAutosave(false);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [writeCurrentAutosave]);
+
   const step = useCallback(() => {
     const nextGame = gameRef.current;
     const actions = pendingActionsRef.current;
     pendingActionsRef.current = [];
     setPendingActions([]);
     const result = updateTick(nextGame, actions);
+    const shouldAutosave = result.phaseChanged === "preMarket" || nextGame.phase === "ended";
 
     setGameVersion((version) => version + 1);
     setRecentResults((current) => [result, ...current].slice(0, 120));
+    if (result.playerFills.length > 0) {
+      const fillRecords = result.playerFills.map((fill) => ({ day: result.day, tick: result.tick, fill }));
+      setPlayerFillHistory((current) => {
+        const next = [...current, ...fillRecords].slice(-800);
+        playerFillHistoryRef.current = next;
+        return next;
+      });
+    }
+    if (shouldAutosave) {
+      const success = writeAutosave({
+        game: nextGame,
+        selectedStockId,
+        tickIntervalSeconds,
+        kLineRange,
+        kLineAxisMode,
+        navPage,
+        showTradeMarks,
+        simpleMarketMode,
+        indexBaseValue: indexBaseValueRef.current,
+        playerFillHistory: playerFillHistoryRef.current
+      });
+      setSaveStatus(
+        success
+          ? { label: `Autosaved D${nextGame.day} T${nextGame.tick}`, tone: "saved" }
+          : { label: "Autosave failed", tone: "error" }
+      );
+    }
     if (nextGame.phase === "ended") {
       fastForwardRef.current = { active: false, startDay: 0, restoreRunning: false };
       setFastForward(fastForwardRef.current);
@@ -125,7 +245,7 @@ export function App() {
       setFastForward(fastForwardRef.current);
       setRunning(restoreRunning);
     }
-  }, []);
+  }, [kLineAxisMode, kLineRange, navPage, selectedStockId, showTradeMarks, simpleMarketMode, tickIntervalSeconds]);
 
   const effectiveTickIntervalSeconds = fastForward.active ? 0.02 : tickIntervalSeconds;
 
@@ -144,8 +264,11 @@ export function App() {
     const fresh = createInitialUiGame(`web-mvp-${Date.now()}`);
     gameRef.current = fresh;
     indexBaseValueRef.current = calculateWeightedMarketValue(fresh);
+    clearAutosave();
+    setSaveStatus({ label: "Autosave cleared", tone: "empty" });
     setGameVersion((version) => version + 1);
     setRecentResults([]);
+    setPlayerFillHistory([]);
     pendingActionsRef.current = [];
     setPendingActions([]);
     setRunning(true);
@@ -189,6 +312,11 @@ export function App() {
     }
 
     setRunning((value) => !value);
+  };
+
+  const clearCurrentAutosave = () => {
+    clearAutosave();
+    setSaveStatus({ label: "Autosave cleared", tone: "empty" });
   };
 
   const submitOrder = () => {
@@ -304,12 +432,10 @@ export function App() {
           <button className="icon-button primary" onClick={toggleRunning} aria-label={running ? "Pause" : "Play"}>
             {running ? <Pause size={18} /> : <Play size={18} />}
           </button>
-          <button className="icon-button" onClick={() => step()} aria-label="Next tick">
-            <SkipForward size={18} />
-          </button>
           <button className="icon-button" onClick={resetRun} aria-label="Reset run">
             <RefreshCw size={17} />
           </button>
+          <AutosaveStatus status={saveStatus} onSave={() => writeCurrentAutosave(true)} onClear={clearCurrentAutosave} />
           <label className="speed-control">
             <span>Speed</span>
             <select value={tickIntervalSeconds} onChange={(event) => setTickIntervalSeconds(Number(event.target.value))}>
@@ -345,6 +471,7 @@ export function App() {
           stock={selectedStock}
           trace={selectedTrace}
           recentResults={recentResults}
+          playerFillHistory={playerFillHistory}
           showTradeMarks={showTradeMarks}
           onToggleTradeMarks={() => setShowTradeMarks((value) => !value)}
           kLineRange={kLineRange}
@@ -405,6 +532,7 @@ function MarketOverview({
           {stockIds.map((stockId) => {
             const stock = game.stocks[stockId];
             const change = dailyChangePct(stock);
+            const tone = marketTone(change);
             return (
               <button
                 key={stock.id}
@@ -417,10 +545,16 @@ function MarketOverview({
                   <span>{stock.name}</span>
                   <em>{titleCase(stock.sector)}</em>
                 </div>
-                <MiniIntradaySparkline chart={stock.chart} previousClose={stock.previousClose} currentDay={game.day} />
-                <div className="simple-market-price">
-                  <strong className={change >= 0 ? "tone-up" : "tone-down"}>{stock.price.toFixed(2)}</strong>
-                  <span className={change >= 0 ? "tone-up" : "tone-down"}>{signedPct(change)}</span>
+                <MiniIntradaySparkline
+                  chart={stock.chart}
+                  previousClose={stock.previousClose}
+                  lowerLimit={getLowerLimit(stock)}
+                  upperLimit={getUpperLimit(stock)}
+                  currentDay={game.day}
+                />
+                <div className={`simple-market-price ${tone}`}>
+                  <strong>{stock.price.toFixed(2)}</strong>
+                  <span>{signedPct(change)}</span>
                 </div>
               </button>
             );
@@ -490,6 +624,7 @@ function StockWorkspace({
   stock,
   trace,
   recentResults,
+  playerFillHistory,
   showTradeMarks,
   onToggleTradeMarks,
   kLineRange,
@@ -501,6 +636,7 @@ function StockWorkspace({
   stock: Stock;
   trace?: StockTraceView;
   recentResults: TickResult[];
+  playerFillHistory: PlayerFillRecord[];
   showTradeMarks: boolean;
   onToggleTradeMarks: () => void;
   kLineRange: KLineRange;
@@ -512,6 +648,7 @@ function StockWorkspace({
   const valuation = getValuationSnapshot(stock);
   const activeNews = game.news.filter((news) => news.scope === "market" || news.targetId === stock.id || news.targetId === stock.sector);
   const tradeMarks = useMemo(() => createTradeMarks(recentResults, stock.id, game.day), [game.day, recentResults, stock.id]);
+  const dailyTradeMarks = useMemo(() => createDailyTradeMarks(playerFillHistory, stock.id), [playerFillHistory, stock.id]);
 
   return (
     <section className="panel stock-panel">
@@ -523,9 +660,9 @@ function StockWorkspace({
             <span className="board-badge">{boardLabel(stock.boardType)}</span>
           </div>
           <div className="muted">{stock.name}</div>
-          <div className={dailyChangePct(stock) >= 0 ? "price-line tone-up" : "price-line tone-down"}>
+          <div className={`price-line tone-${marketTone(dailyChangePct(stock))}`}>
             {stock.price.toFixed(2)}
-            <span>{signedMoney(stock.price - stock.previousClose)} ({signedPct(dailyChangePct(stock))})</span>
+            <span>{signedPriceMove(stock.price - stock.previousClose)} ({signedPct(dailyChangePct(stock))})</span>
           </div>
         </div>
         <div className="info-matrix">
@@ -593,7 +730,14 @@ function StockWorkspace({
               </select>
             </div>
           </div>
-          <KLineChart candles={stock.dailyCandles} range={kLineRange} axisMode={kLineAxisMode} currentDay={game.day} />
+          <KLineChart
+            candles={stock.dailyCandles}
+            range={kLineRange}
+            axisMode={kLineAxisMode}
+            currentDay={game.day}
+            tradeMarks={dailyTradeMarks}
+            showTradeMarks={showTradeMarks}
+          />
         </div>
       </div>
 
@@ -770,11 +914,29 @@ function WhaleIndexBar({ index }: { index: WhaleIndexSnapshot }) {
   return (
     <div className="whale-index">
       <div className="whale-index-label">Whale Index</div>
-      <div className={index.change >= 0 ? "whale-index-value tone-up" : "whale-index-value tone-down"}>{index.value.toFixed(2)}</div>
-      <div className={index.change >= 0 ? "whale-index-change tone-up" : "whale-index-change tone-down"}>
+      <div className={`whale-index-value tone-${index.tone}`}>{index.value.toFixed(2)}</div>
+      <div className={`whale-index-change tone-${index.tone}`}>
         <strong>{index.change >= 0 ? "+" : ""}{index.change.toFixed(2)}</strong>
         <span>{index.changePct >= 0 ? "+" : ""}{index.changePct.toFixed(2)}%</span>
       </div>
+    </div>
+  );
+}
+
+function AutosaveStatus({
+  status,
+  onSave,
+  onClear
+}: {
+  status: SaveStatus;
+  onSave: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className={`autosave-status ${status.tone}`}>
+      <span title={status.label}>{status.label}</span>
+      <button type="button" onClick={onSave}>Save</button>
+      <button type="button" onClick={onClear}>Clear</button>
     </div>
   );
 }
@@ -807,23 +969,22 @@ function QuickPicker({
 function MiniIntradaySparkline({
   chart,
   previousClose,
+  lowerLimit,
+  upperLimit,
   currentDay
 }: {
   chart: TickPrice[];
   previousClose: number;
+  lowerLimit: number;
+  upperLimit: number;
   currentDay: number;
 }) {
   const points = chart.filter((point) => point.day === currentDay);
   const width = 170;
   const height = 48;
   const values = points.length > 0 ? points : [{ day: currentDay, tick: 0, price: previousClose, boardState: "loose" as BoardState }];
-  const prices = values.map((point) => point.price);
-  const min = Math.min(...prices, previousClose);
-  const max = Math.max(...prices, previousClose);
-  const span = Math.max(0.01, max - min);
-  const pad = span * 0.16;
-  const low = min - pad;
-  const high = max + pad;
+  const low = Math.min(lowerLimit, previousClose);
+  const high = Math.max(upperLimit, previousClose, low + 0.01);
   const lastTickIndex = Math.max(1, GAME_CONFIG.ticksPerDay - 1);
   const xForTick = (tick: number) => (Math.min(lastTickIndex, Math.max(0, tick)) / lastTickIndex) * width;
   const yFor = (price: number) => height - ((price - low) / (high - low)) * height;
@@ -1145,19 +1306,28 @@ function KLineChart({
   candles,
   range,
   axisMode,
-  currentDay
+  currentDay,
+  tradeMarks,
+  showTradeMarks
 }: {
   candles: DailyCandle[];
   range: KLineRange;
   axisMode: KLineAxisMode;
   currentDay: number;
+  tradeMarks: DailyTradeMark[];
+  showTradeMarks: boolean;
 }) {
-  const closedCandles = candles.filter((candle) => candle.day < currentDay);
-  const rangeSize = range === "all" ? closedCandles.length : range;
-  const visibleCandles = closedCandles.slice(-rangeSize);
+  const [hover, setHover] = useState<KLineHover | undefined>();
+  const liveCandles = candles.filter((candle) => candle.day <= currentDay);
+  const rangeSize = range === "all" ? liveCandles.length : range;
+  const visibleCandles = liveCandles.slice(-rangeSize);
   const prices = visibleCandles.flatMap((candle) => [candle.high, candle.low]);
   if (visibleCandles.length === 0 || prices.length === 0) {
-    return <svg className="chart-svg" viewBox="0 0 360 172" role="img" aria-label="K-line candlestick chart" />;
+    return (
+      <div className="intraday-frame">
+        <svg className="chart-svg" viewBox="0 0 360 172" role="img" aria-label="K-line candlestick chart" />
+      </div>
+    );
   }
   const min = Math.min(...prices);
   const max = Math.max(...prices);
@@ -1174,6 +1344,7 @@ function KLineChart({
   const candleWidth = Math.max(4, Math.min(13, width / slotCount - 5));
   const xFor = (index: number) => (visibleCandles.length <= 1 ? 14 : 10 + (index / Math.max(1, visibleCandles.length - 1)) * (width - 20));
   const yFor = (price: number) => priceHeight - ((price - low) / (high - low)) * priceHeight;
+  const priceForY = (y: number) => high - (Math.min(priceHeight, Math.max(0, y)) / priceHeight) * (high - low);
   const maxVolume = Math.max(1, ...visibleCandles.map((candle) => candle.volume));
   const volumeY = (volume: number) => volumeTop + 28 - (volume / maxVolume) * 28;
   const ma = visibleCandles.map((_, index) => {
@@ -1186,40 +1357,107 @@ function KLineChart({
   });
   const maPath = ma.map((price, index) => `${xFor(index).toFixed(1)},${yFor(price).toFixed(1)}`).join(" ");
   const ma10Path = ma10.map((price, index) => `${xFor(index).toFixed(1)},${yFor(price).toFixed(1)}`).join(" ");
+  const visibleDaySet = new Set(visibleCandles.map((candle) => candle.day));
+  const visibleTradeMarks = tradeMarks.filter((mark) => visibleDaySet.has(mark.day));
+  const candleIndexByDay = new Map(visibleCandles.map((candle, index) => [candle.day, index]));
+  const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.min(width, Math.max(0, ((event.clientX - rect.left) / rect.width) * width));
+    const y = Math.min(height, Math.max(0, ((event.clientY - rect.top) / rect.height) * height));
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    visibleCandles.forEach((_, index) => {
+      const distance = Math.abs(xFor(index) - x);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+    setHover({
+      x,
+      y,
+      coordPrice: priceForY(y),
+      candle: visibleCandles[nearestIndex],
+      index: nearestIndex
+    });
+  };
 
   return (
-    <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="K-line candlestick chart">
-      <GridLines width={width} height={height} xLines={[0.25, 0.5, 0.75]} />
-      {visibleCandles.map((candle, index) => {
-        const up = candle.close >= candle.open;
-        const x = xFor(index);
-        const openY = yFor(candle.open);
-        const closeY = yFor(candle.close);
-        const bodyY = Math.min(openY, closeY);
-        const bodyHeight = Math.max(2, Math.abs(openY - closeY));
-        return (
-          <g key={`${candle.day}-${index}`} className={up ? "candle up" : "candle down"}>
-            <line x1={x} x2={x} y1={yFor(candle.high)} y2={yFor(candle.low)} />
-            <rect x={x - candleWidth / 2} y={bodyY} width={candleWidth} height={bodyHeight} rx="1" />
-            <rect className="volume-bar" x={x - candleWidth / 2} y={volumeY(candle.volume)} width={candleWidth} height={volumeTop + 28 - volumeY(candle.volume)} rx="1" />
+    <div className="intraday-frame">
+      <svg
+        className="chart-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="K-line candlestick chart"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHover(undefined)}
+      >
+        <GridLines width={width} height={height} xLines={[0.25, 0.5, 0.75]} />
+        {visibleCandles.map((candle, index) => {
+          const up = candle.close >= candle.open;
+          const x = xFor(index);
+          const openY = yFor(candle.open);
+          const closeY = yFor(candle.close);
+          const bodyY = Math.min(openY, closeY);
+          const bodyHeight = Math.max(2, Math.abs(openY - closeY));
+          return (
+            <g key={`${candle.day}-${index}`} className={up ? "candle up" : "candle down"}>
+              <line x1={x} x2={x} y1={yFor(candle.high)} y2={yFor(candle.low)} />
+              <rect x={x - candleWidth / 2} y={bodyY} width={candleWidth} height={bodyHeight} rx="1" />
+              <rect className="volume-bar" x={x - candleWidth / 2} y={volumeY(candle.volume)} width={candleWidth} height={volumeTop + 28 - volumeY(candle.volume)} rx="1" />
+            </g>
+          );
+        })}
+        <polyline points={maPath} className="ma-line" />
+        <polyline points={ma10Path} className="ma-line secondary" />
+        {showTradeMarks
+          ? visibleTradeMarks.map((mark) => {
+              const index = candleIndexByDay.get(mark.day);
+              if (index === undefined) return null;
+              const x = xFor(index);
+              const y = yFor(mark.price);
+              const textY = mark.side === "buy" ? y - 7 : y + 12;
+              return (
+                <g className={`trade-mark kline-trade-mark ${mark.side}`} key={`${mark.side}-${mark.day}`}>
+                  <title>
+                    {`${mark.side.toUpperCase()} ${formatDayLabel(mark.day)} ${shortShares(mark.shares)} @ ${mark.price.toFixed(2)} | ${shortMoney(mark.notional)}${
+                      mark.count > 1 ? ` | ${mark.count} fills` : ""
+                    }`}
+                  </title>
+                  <circle cx={x} cy={y} r="3.2" />
+                  <text x={x + 5} y={textY}>{mark.side === "buy" ? "B" : "S"}</text>
+                </g>
+              );
+            })
+          : null}
+        {hover ? (
+          <g className="chart-hover-layer kline-hover-layer">
+            <line x1={xFor(hover.index)} x2={xFor(hover.index)} y1="0" y2={height} />
+            <line x1="0" x2={width} y1={Math.min(priceHeight, hover.y)} y2={Math.min(priceHeight, hover.y)} />
+            <circle cx={xFor(hover.index)} cy={yFor(hover.candle.close)} r="3.4" />
+            <rect x="4" y="4" width="154" height="50" rx="4" />
+            <text x="10" y="17">{formatDayLabel(hover.candle.day)} O {hover.candle.open.toFixed(2)} H {hover.candle.high.toFixed(2)}</text>
+            <text x="10" y="31">L {hover.candle.low.toFixed(2)} C {hover.candle.close.toFixed(2)} {signedPct(((hover.candle.close - hover.candle.open) / Math.max(0.01, hover.candle.open)) * 100)}</text>
+            <text x="10" y="45">Vol {shortShares(hover.candle.volume)}</text>
+            <text x={width} y={Math.min(priceHeight - 4, Math.max(12, hover.y - 5))} textAnchor="end">
+              cursor {hover.coordPrice.toFixed(2)}
+            </text>
           </g>
-        );
-      })}
-      <polyline points={maPath} className="ma-line" />
-      <polyline points={ma10Path} className="ma-line secondary" />
-      <g className="ma-legend">
-        <text x="0" y="11">MA5</text>
-        <text x="31" y="11" className="secondary">MA10</text>
-      </g>
-      <g className="axis-labels">
-        <text x="0" y={height - 2}>{formatDayLabel(visibleCandles[0].day)}</text>
-        <text x={width} y={height - 2} textAnchor="end">{formatDayLabel(visibleCandles.at(-1)?.day ?? 1)}</text>
-      </g>
-      <g className="axis-labels price-axis">
-        <text x={width} y="10" textAnchor="end">{high.toFixed(2)}</text>
-        <text x={width} y={priceHeight - 3} textAnchor="end">{low.toFixed(2)}</text>
-      </g>
-    </svg>
+        ) : null}
+        <g className="ma-legend">
+          <text x="0" y="11">MA5</text>
+          <text x="31" y="11" className="secondary">MA10</text>
+        </g>
+        <g className="axis-labels">
+          <text x="0" y={height - 2}>{formatDayLabel(visibleCandles[0].day)}</text>
+          <text x={width} y={height - 2} textAnchor="end">{formatDayLabel(visibleCandles.at(-1)?.day ?? 1)}</text>
+        </g>
+        <g className="axis-labels price-axis">
+          <text x={width} y="10" textAnchor="end">{high.toFixed(2)}</text>
+          <text x={width} y={priceHeight - 3} textAnchor="end">{low.toFixed(2)}</text>
+        </g>
+      </svg>
+    </div>
   );
 }
 
@@ -1326,19 +1564,32 @@ function ProgressBar({ value, dayValue }: { value: number; dayValue?: number }) 
 }
 
 function calculateWeightedMarketValue(game: GameState): number {
-  return Object.values(game.stocks).reduce((total, stock) => total + stock.marketCap * stock.price, 0);
+  return Object.values(game.stocks).reduce((total, stock) => total + stock.sharesOutstanding * stock.price, 0);
+}
+
+function calculatePreviousCloseWeightedMarketValue(game: GameState): number {
+  return Object.values(game.stocks).reduce((total, stock) => total + stock.sharesOutstanding * stock.previousClose, 0);
 }
 
 function calculateWhaleIndex(game: GameState, baseValue: number): WhaleIndexSnapshot {
   const currentValue = calculateWeightedMarketValue(game);
+  const previousCloseValue = calculatePreviousCloseWeightedMarketValue(game);
   const value = baseValue > 0 ? (currentValue / baseValue) * 1000 : 1000;
-  const change = value - 1000;
-  const changePct = (value / 1000 - 1) * 100;
+  const previousCloseIndex = baseValue > 0 ? (previousCloseValue / baseValue) * 1000 : 1000;
+  const change = value - previousCloseIndex;
+  const changePct = previousCloseValue > 0 ? (currentValue / previousCloseValue - 1) * 100 : 0;
   return {
     value,
     change,
-    changePct
+    changePct,
+    tone: marketTone(change)
   };
+}
+
+function marketTone(value: number): MarketTone {
+  if (value > 0.005) return "up";
+  if (value < -0.005) return "down";
+  return "flat";
 }
 
 function createTradeMarks(results: TickResult[], stockId: StockId, currentDay: number): TradeMark[] {
@@ -1381,6 +1632,40 @@ function createTradeMarks(results: TickResult[], stockId: StockId, currentDay: n
   return marks;
 }
 
+function createDailyTradeMarks(fillHistory: PlayerFillRecord[], stockId: StockId): DailyTradeMark[] {
+  const grouped = new Map<string, DailyTradeMark>();
+
+  for (const record of fillHistory) {
+    const fill = record.fill;
+    if (fill.stockId !== stockId || fill.filledShares <= 0 || fill.filledNotional <= 0) continue;
+    const key = `${record.day}-${fill.side}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        side: fill.side,
+        day: record.day,
+        price: fill.avgPrice > 0 ? fill.avgPrice : fill.finalPrice,
+        shares: fill.filledShares,
+        notional: fill.filledNotional,
+        count: 1
+      });
+      continue;
+    }
+
+    const shares = existing.shares + fill.filledShares;
+    const notional = existing.notional + fill.filledNotional;
+    grouped.set(key, {
+      ...existing,
+      price: notional / Math.max(1, shares),
+      shares,
+      notional,
+      count: existing.count + 1
+    });
+  }
+
+  return Array.from(grouped.values()).sort((first, second) => first.day - second.day || first.side.localeCompare(second.side));
+}
+
 function findNearestTickPoint(points: TickPrice[], tick: number): TickPrice {
   return points.reduce((nearest, point) => (Math.abs(point.tick - tick) < Math.abs(nearest.tick - tick) ? point : nearest), points[0]);
 }
@@ -1399,6 +1684,86 @@ function createInitialUiGame(seed: string) {
   updateTick(game);
   updateTick(game);
   return game;
+}
+
+function readAutosave(): AutosaveFile | undefined {
+  if (typeof window === "undefined") return undefined;
+
+  try {
+    const raw = window.localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return undefined;
+
+    const parsed = JSON.parse(raw) as Partial<AutosaveFile>;
+    if (parsed.version !== 1 || !parsed.game || !parsed.ui) return undefined;
+    return parsed as AutosaveFile;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeAutosave(args: {
+  game: GameState;
+  selectedStockId: StockId;
+  tickIntervalSeconds: number;
+  kLineRange: KLineRange;
+  kLineAxisMode: KLineAxisMode;
+  navPage: NavPage;
+  showTradeMarks: boolean;
+  simpleMarketMode: boolean;
+  indexBaseValue: number;
+  playerFillHistory: PlayerFillRecord[];
+}): boolean {
+  if (typeof window === "undefined") return false;
+
+  const save: AutosaveFile = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    game: args.game,
+    ui: {
+      selectedStockId: args.selectedStockId,
+      tickIntervalSeconds: args.tickIntervalSeconds,
+      kLineRange: args.kLineRange,
+      kLineAxisMode: args.kLineAxisMode,
+      navPage: args.navPage,
+      showTradeMarks: args.showTradeMarks,
+      simpleMarketMode: args.simpleMarketMode,
+      indexBaseValue: args.indexBaseValue,
+      playerFillHistory: args.playerFillHistory
+    }
+  };
+
+  try {
+    window.localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(save));
+    return true;
+  } catch {
+    // Autosave is best-effort; gameplay should continue if storage is full or blocked.
+    return false;
+  }
+}
+
+function clearAutosave(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(AUTOSAVE_KEY);
+  } catch {
+    // Ignore storage failures while resetting a local run.
+  }
+}
+
+function getInitialStockId(save: AutosaveFile | undefined, game: GameState): StockId {
+  const savedStockId = save?.ui.selectedStockId;
+  return savedStockId && game.stocks[savedStockId] ? savedStockId : "DRAGON_SOFT";
+}
+
+function formatSaveTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function money(value: number) {
@@ -1423,6 +1788,10 @@ function compactMoney(value: number) {
 
 function signedMoney(value: number) {
   return `${value >= 0 ? "+" : ""}${money(value)}`;
+}
+
+function signedPriceMove(value: number) {
+  return `${value >= 0 ? "+" : ""}CNY ${value.toFixed(2)}`;
 }
 
 function signedShortMoney(value: number) {
