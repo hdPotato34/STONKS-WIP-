@@ -442,6 +442,16 @@ export type StockTickTrace = {
   heatCauses: HeatCauseTrace[];
 };
 
+export type TickDetailLevel = "summary" | "full";
+
+export type TickOptions = {
+  detail?: TickDetailLevel;
+};
+
+export type TickResultDetail = {
+  stocks: StockTickTrace[];
+};
+
 export type TickResult = {
   day: number;
   tick: number;
@@ -451,4 +461,5 @@ export type TickResult = {
   playerFills: ExecutionFill[];
   whaleTrades: ExecutionFill[];
   events: GameEvent[];
+  detail?: TickResultDetail;
 };

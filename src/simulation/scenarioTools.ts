@@ -4,13 +4,13 @@ import { updateTick } from "./tick";
 export function advanceToIntraday(game: GameState): TickResult[] {
   const results: TickResult[] = [];
   while (game.phase === "preMarket" || game.phase === "openingAuction") {
-    results.push(updateTick(game));
+    results.push(updateTick(game, [], { detail: "full" }));
   }
   return results;
 }
 
 export function runScenarioTicks(game: GameState, ticks: Array<PlayerAction[] | undefined>): TickResult[] {
-  return ticks.map((actions) => updateTick(game, actions ?? []));
+  return ticks.map((actions) => updateTick(game, actions ?? [], { detail: "full" }));
 }
 
 export function findStockTrace(result: TickResult, stockId: StockId): StockTickTrace {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, BarChart3, Pause, Play, RefreshCw, SkipForward, Star, Wallet } from "lucide-react";
+import { Activity, BarChart3, ChevronsRight, Pause, Play, RefreshCw, SkipForward, Star, Wallet } from "lucide-react";
 import { GAME_CONFIG, roundMoney } from "../game/config";
 import { createInitialGame } from "../game/createInitialGame";
 import { getValuationSnapshot } from "../game/fundamentals";
@@ -15,6 +15,39 @@ type TradeSide = "buy" | "sell";
 type NavPage = "market" | "fundamentals" | "portfolio";
 type KLineRange = 5 | 20 | 60 | "all";
 type KLineAxisMode = "auto" | "pct10" | "pct20";
+type StockTraceView = TickResult["stocks"][number];
+type TradeMark = {
+  side: "buy" | "sell";
+  day: number;
+  tick: number;
+  price: number;
+  shares: number;
+  notional: number;
+  count: number;
+};
+type ChartHover = {
+  x: number;
+  y: number;
+  tick: number;
+  coordPrice: number;
+  point: TickPrice;
+};
+type FastForwardState = {
+  active: boolean;
+  startDay: number;
+  restoreRunning: boolean;
+};
+type WhaleFeedRow = {
+  key: string;
+  day: number;
+  tick: number;
+  whale: string;
+  side: "buy" | "sell";
+  stockId: StockId;
+  shares: number;
+  avgPrice: number;
+  intention: string;
+};
 
 const stockIds: StockId[] = [
   "DRAGON_SOFT",
@@ -28,25 +61,25 @@ const stockIds: StockId[] = [
 ];
 
 export function App() {
-  const [game, setGame] = useState<GameState>(() => createInitialUiGame("web-mvp"));
+  const gameRef = useRef<GameState>(createInitialUiGame("web-mvp"));
+  const [, setGameVersion] = useState(0);
+  const game = gameRef.current;
   const [selectedStockId, setSelectedStockId] = useState<StockId>("DRAGON_SOFT");
   const [recentResults, setRecentResults] = useState<TickResult[]>([]);
   const [pendingActions, setPendingActions] = useState<PlayerAction[]>([]);
   const [running, setRunning] = useState(true);
   const [tickIntervalSeconds, setTickIntervalSeconds] = useState<number>(GAME_CONFIG.tickDurationSeconds);
+  const [fastForward, setFastForward] = useState<FastForwardState>({ active: false, startDay: 0, restoreRunning: true });
   const [kLineRange, setKLineRange] = useState<KLineRange>(20);
   const [kLineAxisMode, setKLineAxisMode] = useState<KLineAxisMode>("auto");
   const [tradeSide, setTradeSide] = useState<TradeSide>("buy");
+  const [showTradeMarks, setShowTradeMarks] = useState(false);
   const [quantity, setQuantity] = useState("10000");
-  const [limitPrice, setLimitPrice] = useState(() => createInitialGame("web-mvp").stocks.DRAGON_SOFT.price.toFixed(2));
+  const [limitPrice, setLimitPrice] = useState(() => gameRef.current.stocks.DRAGON_SOFT.price.toFixed(2));
   const [navPage, setNavPage] = useState<NavPage>("market");
   const [ticketMessage, setTicketMessage] = useState("");
-  const gameRef = useRef(game);
   const pendingActionsRef = useRef<PlayerAction[]>([]);
-
-  useEffect(() => {
-    gameRef.current = game;
-  }, [game]);
+  const fastForwardRef = useRef<FastForwardState>(fastForward);
 
   const selectedStock = game.stocks[selectedStockId];
   const selectedTrace = useMemo(() => {
@@ -61,26 +94,38 @@ export function App() {
     });
   }, []);
 
+  useEffect(() => {
+    fastForwardRef.current = fastForward;
+  }, [fastForward]);
+
   const step = useCallback(() => {
-    const nextGame = structuredClone(gameRef.current) as GameState;
+    const nextGame = gameRef.current;
     const actions = pendingActionsRef.current;
     pendingActionsRef.current = [];
     setPendingActions([]);
     const result = updateTick(nextGame, actions);
 
-    gameRef.current = nextGame;
-    setGame(nextGame);
-    setRecentResults((current) => [result, ...current].slice(0, 600));
+    setGameVersion((version) => version + 1);
+    setRecentResults((current) => [result, ...current].slice(0, 120));
     if (nextGame.phase === "ended") {
+      fastForwardRef.current = { active: false, startDay: 0, restoreRunning: false };
+      setFastForward(fastForwardRef.current);
       setRunning(false);
+    } else if (fastForwardRef.current.active && nextGame.day > fastForwardRef.current.startDay) {
+      const restoreRunning = fastForwardRef.current.restoreRunning;
+      fastForwardRef.current = { active: false, startDay: 0, restoreRunning };
+      setFastForward(fastForwardRef.current);
+      setRunning(restoreRunning);
     }
   }, []);
 
+  const effectiveTickIntervalSeconds = fastForward.active ? 0.02 : tickIntervalSeconds;
+
   useEffect(() => {
     if (!running) return undefined;
-    const id = window.setInterval(() => step(), tickIntervalSeconds * 1000);
+    const id = window.setInterval(() => step(), effectiveTickIntervalSeconds * 1000);
     return () => window.clearInterval(id);
-  }, [running, step, tickIntervalSeconds]);
+  }, [effectiveTickIntervalSeconds, running, step]);
 
   useEffect(() => {
     setLimitPrice(gameRef.current.stocks[selectedStockId].price.toFixed(2));
@@ -90,11 +135,13 @@ export function App() {
   const resetRun = () => {
     const fresh = createInitialUiGame(`web-mvp-${Date.now()}`);
     gameRef.current = fresh;
-    setGame(fresh);
+    setGameVersion((version) => version + 1);
     setRecentResults([]);
     pendingActionsRef.current = [];
     setPendingActions([]);
     setRunning(true);
+    fastForwardRef.current = { active: false, startDay: 0, restoreRunning: true };
+    setFastForward(fastForwardRef.current);
     setTickIntervalSeconds(GAME_CONFIG.tickDurationSeconds);
     setKLineRange(20);
     setKLineAxisMode("auto");
@@ -103,6 +150,36 @@ export function App() {
     setQuantity("10000");
     setLimitPrice(fresh.stocks.DRAGON_SOFT.price.toFixed(2));
     setTicketMessage("");
+  };
+
+  const toggleFastForward = () => {
+    const current = fastForwardRef.current;
+    if (current.active) {
+      fastForwardRef.current = { active: false, startDay: 0, restoreRunning: current.restoreRunning };
+      setFastForward(fastForwardRef.current);
+      setRunning(current.restoreRunning);
+      return;
+    }
+
+    const next = {
+      active: true,
+      startDay: gameRef.current.day,
+      restoreRunning: running
+    };
+    fastForwardRef.current = next;
+    setFastForward(next);
+    setRunning(true);
+  };
+
+  const toggleRunning = () => {
+    if (fastForwardRef.current.active) {
+      fastForwardRef.current = { active: false, startDay: 0, restoreRunning: false };
+      setFastForward(fastForwardRef.current);
+      setRunning(false);
+      return;
+    }
+
+    setRunning((value) => !value);
   };
 
   const submitOrder = () => {
@@ -191,7 +268,21 @@ export function App() {
             <span>Day</span>
             <strong>{game.day} / {GAME_CONFIG.totalDays}</strong>
           </div>
-          <ProgressBar value={(game.day - 1) / GAME_CONFIG.totalDays} />
+          <div className="progress-with-skip">
+            <ProgressBar
+              value={(game.day - 1) / GAME_CONFIG.totalDays}
+              dayValue={game.tick / GAME_CONFIG.ticksPerDay}
+            />
+            <button
+              className={fastForward.active ? "fast-forward-button active" : "fast-forward-button"}
+              onClick={toggleFastForward}
+              type="button"
+              aria-label={fastForward.active ? "Stop fast forward" : "Fast forward to next day"}
+              title={fastForward.active ? "Stop fast forward" : "Fast forward to next day"}
+            >
+              <ChevronsRight size={14} strokeWidth={2.4} />
+            </button>
+          </div>
           <div className="clock-item">
             <span>Tick</span>
             <strong>{game.tick} / {GAME_CONFIG.ticksPerDay}</strong>
@@ -199,7 +290,7 @@ export function App() {
         </div>
 
         <div className="run-controls">
-          <button className="icon-button primary" onClick={() => setRunning((value) => !value)} aria-label={running ? "Pause" : "Play"}>
+          <button className="icon-button primary" onClick={toggleRunning} aria-label={running ? "Pause" : "Play"}>
             {running ? <Pause size={18} /> : <Play size={18} />}
           </button>
           <button className="icon-button" onClick={() => step()} aria-label="Next tick">
@@ -237,6 +328,8 @@ export function App() {
           stock={selectedStock}
           trace={selectedTrace}
           recentResults={recentResults}
+          showTradeMarks={showTradeMarks}
+          onToggleTradeMarks={() => setShowTradeMarks((value) => !value)}
           kLineRange={kLineRange}
           kLineAxisMode={kLineAxisMode}
           onKLineRangeChange={setKLineRange}
@@ -339,6 +432,8 @@ function StockWorkspace({
   stock,
   trace,
   recentResults,
+  showTradeMarks,
+  onToggleTradeMarks,
   kLineRange,
   kLineAxisMode,
   onKLineRangeChange,
@@ -346,8 +441,10 @@ function StockWorkspace({
 }: {
   game: GameState;
   stock: Stock;
-  trace?: TickResult["stocks"][number];
+  trace?: StockTraceView;
   recentResults: TickResult[];
+  showTradeMarks: boolean;
+  onToggleTradeMarks: () => void;
   kLineRange: KLineRange;
   kLineAxisMode: KLineAxisMode;
   onKLineRangeChange: (range: KLineRange) => void;
@@ -356,6 +453,7 @@ function StockWorkspace({
   const position = game.player.positions[stock.id];
   const valuation = getValuationSnapshot(stock);
   const activeNews = game.news.filter((news) => news.scope === "market" || news.targetId === stock.id || news.targetId === stock.sector);
+  const tradeMarks = useMemo(() => createTradeMarks(recentResults, stock.id, game.day), [game.day, recentResults, stock.id]);
 
   return (
     <section className="panel stock-panel">
@@ -400,7 +498,14 @@ function StockWorkspace({
             <strong>Intraday</strong>
             <span>09:30-15:00 / {GAME_CONFIG.ticksPerDay} ticks</span>
           </div>
-          <IntradayChart chart={stock.chart} previousClose={stock.previousClose} currentDay={game.day} />
+          <IntradayChart
+            chart={stock.chart}
+            previousClose={stock.previousClose}
+            currentDay={game.day}
+            tradeMarks={tradeMarks}
+            showTradeMarks={showTradeMarks}
+            onToggleTradeMarks={onToggleTradeMarks}
+          />
         </div>
         <div className="chart-card">
           <div className="chart-head">
@@ -518,6 +623,20 @@ function OrderTicket({
   const notional = shares * price;
   const position = game.player.positions[stock.id];
   const canTrade = game.phase === "intraday" || game.phase === "closingAuction";
+  const applyPositionFraction = (fraction: number) => {
+    if (side === "buy") {
+      const referencePrice = price > 0 ? price : stock.price;
+      const targetShares = referencePrice > 0 ? Math.floor((game.player.cash * fraction) / referencePrice) : 0;
+      onQuantityChange(targetShares.toString());
+      return;
+    }
+
+    const targetShares = Math.floor((position?.sellableShares ?? 0) * fraction);
+    onQuantityChange(targetShares.toString());
+  };
+  const applyPrice = (nextPrice: number) => {
+    onLimitPriceChange(Math.max(0, nextPrice).toFixed(2));
+  };
 
   return (
     <section className="panel side-panel ticket-panel">
@@ -541,14 +660,34 @@ function OrderTicket({
             Sell
           </button>
         </div>
-        <label className="field-row">
+        <div className="field-row">
           <span>Quantity (Shares)</span>
+          <QuickPicker
+            label="Position size"
+            trigger="%"
+            options={[
+              { label: "1/10", onSelect: () => applyPositionFraction(0.1) },
+              { label: "1/4", onSelect: () => applyPositionFraction(0.25) },
+              { label: "1/2", onSelect: () => applyPositionFraction(0.5) },
+              { label: "All", onSelect: () => applyPositionFraction(1) }
+            ]}
+          />
           <input inputMode="numeric" value={quantity} onChange={(event) => onQuantityChange(event.target.value)} />
-        </label>
-        <label className="field-row">
+        </div>
+        <div className="field-row">
           <span>Limit Price (CNY)</span>
+          <QuickPicker
+            label="Price presets"
+            trigger="P"
+            options={[
+              { label: "Current", onSelect: () => applyPrice(stock.price) },
+              { label: "Open", onSelect: () => applyPrice(stock.open) },
+              { label: "Limit Up", onSelect: () => applyPrice(getUpperLimit(stock)) },
+              { label: "Limit Down", onSelect: () => applyPrice(getLowerLimit(stock)) }
+            ]}
+          />
           <input inputMode="decimal" value={limitPrice} onChange={(event) => onLimitPriceChange(event.target.value)} />
-        </label>
+        </div>
         <div className="ticket-summary">
           <div>
             <span>Est. Notional</span>
@@ -569,21 +708,32 @@ function OrderTicket({
   );
 }
 
-function WhaleFeed({
-  rows
+function QuickPicker({
+  label,
+  trigger,
+  options
 }: {
-  rows: Array<{
-    key: string;
-    day: number;
-    tick: number;
-    whale: string;
-    side: "buy" | "sell";
-    stockId: StockId;
-    shares: number;
-    avgPrice: number;
-    intention: string;
-  }>;
+  label: string;
+  trigger: string;
+  options: Array<{ label: string; onSelect: () => void }>;
 }) {
+  return (
+    <div className="quick-picker">
+      <button className="quick-trigger" type="button" aria-label={label} title={label}>
+        {trigger}
+      </button>
+      <div className="quick-popover" role="menu" aria-label={label}>
+        {options.map((option) => (
+          <button key={option.label} type="button" onClick={option.onSelect} role="menuitem">
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WhaleFeed({ rows }: { rows: WhaleFeedRow[] }) {
   return (
     <section className="panel side-panel whale-feed">
       <PanelTitle title="Whale Trades (Live)" />
@@ -746,7 +896,22 @@ function PortfolioPanel({ game }: { game: GameState }) {
   );
 }
 
-function IntradayChart({ chart, previousClose, currentDay }: { chart: TickPrice[]; previousClose: number; currentDay: number }) {
+function IntradayChart({
+  chart,
+  previousClose,
+  currentDay,
+  tradeMarks,
+  showTradeMarks,
+  onToggleTradeMarks
+}: {
+  chart: TickPrice[];
+  previousClose: number;
+  currentDay: number;
+  tradeMarks: TradeMark[];
+  showTradeMarks: boolean;
+  onToggleTradeMarks: () => void;
+}) {
+  const [hover, setHover] = useState<ChartHover | undefined>();
   const points = chart.filter((point) => point.day === currentDay);
   const prices = points.map((point) => point.price);
   const min = Math.min(...prices, previousClose);
@@ -761,43 +926,110 @@ function IntradayChart({ chart, previousClose, currentDay }: { chart: TickPrice[
   const xForTick = (tick: number) => (Math.min(lastTickIndex, Math.max(0, tick)) / lastTickIndex) * width;
   const xFor = (point: TickPrice) => xForTick(point.tick);
   const yFor = (price: number) => height - ((price - low) / (high - low)) * height;
+  const priceForY = (y: number) => high - (y / height) * (high - low);
   const path = points.map((point) => `${xFor(point).toFixed(1)},${yFor(point.price).toFixed(1)}`).join(" ");
   const baseline = yFor(previousClose);
   const last = points[points.length - 1];
+  const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (points.length === 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.min(width, Math.max(0, ((event.clientX - rect.left) / rect.width) * width));
+    const y = Math.min(height, Math.max(0, ((event.clientY - rect.top) / rect.height) * height));
+    const tick = Math.round((x / width) * lastTickIndex);
+    const point = findNearestTickPoint(points, tick);
+    setHover({
+      x,
+      y,
+      tick,
+      coordPrice: priceForY(y),
+      point
+    });
+  };
 
   return (
-    <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Intraday price chart">
-      <GridLines width={width} height={height} xLines={[0.25, 0.5, 0.75]} />
-      <line x1="0" x2={width} y1={baseline} y2={baseline} className="baseline" />
-      <polyline points={path} className="intraday-line" />
-      {points.map((point, index) =>
-        point.boardState === "sealedLimitUp" || point.boardState === "limitDown" ? (
-          <circle
-            key={`${point.day}-${point.tick}`}
-            cx={xFor(point)}
-            cy={yFor(point.price)}
-            r="3"
-            className={point.boardState === "sealedLimitUp" ? "event-dot up" : "event-dot down"}
-          />
-        ) : null
-      )}
-      {last ? (
-        <>
-          <circle cx={xFor(last)} cy={yFor(last.price)} r="3.5" className="last-dot" />
-          <text x={Math.min(width - 4, xFor(last) + 34)} y={Math.max(12, yFor(last.price) - 7)} className="price-tag" textAnchor="end">{last.price.toFixed(2)}</text>
-        </>
-      ) : null}
-      <g className="axis-labels">
-        <text x="0" y={height - 2}>09:30</text>
-        <text x={width / 2} y={height - 2} textAnchor="middle">11:30</text>
-        <text x={width} y={height - 2} textAnchor="end">15:00</text>
-      </g>
-      <g className="axis-labels price-axis">
-        <text x={width} y="10" textAnchor="end">{high.toFixed(2)}</text>
-        <text x={width} y={Math.max(20, baseline - 4)} textAnchor="end">prev {previousClose.toFixed(2)}</text>
-        <text x={width} y={height - 16} textAnchor="end">{low.toFixed(2)}</text>
-      </g>
-    </svg>
+    <div className="intraday-frame">
+      <svg
+        className="chart-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="Intraday price chart"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHover(undefined)}
+      >
+        <GridLines width={width} height={height} xLines={[0.25, 0.5, 0.75]} />
+        <line x1="0" x2={width} y1={baseline} y2={baseline} className="baseline" />
+        <polyline points={path} className="intraday-line" />
+        {points.map((point) =>
+          point.boardState === "sealedLimitUp" || point.boardState === "limitDown" ? (
+            <circle
+              key={`${point.day}-${point.tick}`}
+              cx={xFor(point)}
+              cy={yFor(point.price)}
+              r="3"
+              className={point.boardState === "sealedLimitUp" ? "event-dot up" : "event-dot down"}
+            />
+          ) : null
+        )}
+        {showTradeMarks
+          ? tradeMarks.map((mark) => {
+              const x = xForTick(mark.tick);
+              const y = yFor(mark.price);
+              const textY = mark.side === "buy" ? y - 7 : y + 12;
+              return (
+                <g className={`trade-mark ${mark.side}`} key={`${mark.side}-${mark.day}-${mark.tick}-${mark.count}`}>
+                  <title>
+                    {`${mark.side.toUpperCase()} ${shortShares(mark.shares)} @ ${mark.price.toFixed(2)} | ${shortMoney(mark.notional)}${
+                      mark.count > 1 ? ` | ${mark.count} fills` : ""
+                    }`}
+                  </title>
+                  <circle cx={x} cy={y} r="3.2" />
+                  <text x={x + 5} y={textY}>{mark.side === "buy" ? "B" : "S"}</text>
+                </g>
+              );
+            })
+          : null}
+        {last ? (
+          <>
+            <circle cx={xFor(last)} cy={yFor(last.price)} r="3.5" className="last-dot" />
+            <text x={Math.min(width - 4, xFor(last) + 34)} y={Math.max(12, yFor(last.price) - 7)} className="price-tag" textAnchor="end">{last.price.toFixed(2)}</text>
+          </>
+        ) : null}
+        {hover ? (
+          <g className="chart-hover-layer">
+            <line x1={xForTick(hover.tick)} x2={xForTick(hover.tick)} y1="0" y2={height} />
+            <line x1="0" x2={width} y1={hover.y} y2={hover.y} />
+            <circle cx={xFor(hover.point)} cy={yFor(hover.point.price)} r="3.4" />
+            <rect x="4" y="4" width="122" height="34" rx="4" />
+            <text x="10" y="17">{formatIntradayTime(hover.point.tick)} price {hover.point.price.toFixed(2)}</text>
+            <text x="10" y="31">{signedPct(((hover.point.price - previousClose) / previousClose) * 100)}</text>
+            <text x={width} y={Math.min(height - 20, Math.max(12, hover.y - 5))} textAnchor="end">
+              cursor {hover.coordPrice.toFixed(2)}
+            </text>
+          </g>
+        ) : null}
+        <g className="axis-labels">
+          <text x="0" y={height - 2}>09:30</text>
+          <text x={xForTick(120)} y={height - 2} textAnchor="middle">11:30</text>
+          <text x={xForTick(150)} y={height - 2} textAnchor="middle">13:00</text>
+          <text x={width} y={height - 2} textAnchor="end">15:00</text>
+        </g>
+        <g className="axis-labels price-axis">
+          <text x={width} y="10" textAnchor="end">{high.toFixed(2)}</text>
+          <text x={width} y={Math.max(20, baseline - 4)} textAnchor="end">prev {previousClose.toFixed(2)}</text>
+          <text x={width} y={height - 16} textAnchor="end">{low.toFixed(2)}</text>
+        </g>
+      </svg>
+      <button
+        className={showTradeMarks ? "trade-mark-toggle active" : "trade-mark-toggle"}
+        type="button"
+        onClick={onToggleTradeMarks}
+        aria-pressed={showTradeMarks}
+        aria-label="Toggle buy and sell marks"
+      >
+        <span />
+        B/S
+      </button>
+    </div>
   );
 }
 
@@ -969,12 +1201,73 @@ function Signal({ label, value, tone }: { label: string; value: string; tone?: "
   );
 }
 
-function ProgressBar({ value }: { value: number }) {
+function ProgressBar({ value, dayValue }: { value: number; dayValue?: number }) {
   return (
     <div className="progress">
-      <div style={{ width: `${Math.max(2, Math.min(100, value * 100))}%` }} />
+      <div className="run-progress-track">
+        <div className="run-progress-fill" style={{ width: `${Math.max(2, Math.min(100, value * 100))}%` }} />
+      </div>
+      {dayValue === undefined ? null : (
+        <div className="day-progress-track" aria-hidden="true">
+          <div className="day-progress-fill" style={{ width: `${Math.max(2, Math.min(100, dayValue * 100))}%` }} />
+          <span className="midday-marker" />
+        </div>
+      )}
     </div>
   );
+}
+
+function createTradeMarks(results: TickResult[], stockId: StockId, currentDay: number): TradeMark[] {
+  const fills = [...results]
+    .reverse()
+    .flatMap((result) =>
+      result.playerFills
+        .filter((fill) => fill.stockId === stockId && fill.filledShares > 0)
+        .map((fill) => ({
+          side: fill.side,
+          day: result.day,
+          tick: result.tick,
+          price: fill.avgPrice > 0 ? fill.avgPrice : fill.finalPrice,
+          shares: fill.filledShares,
+          notional: fill.filledNotional
+        }))
+    )
+    .filter((fill) => fill.day === currentDay)
+    .sort((a, b) => a.tick - b.tick);
+  const marks: TradeMark[] = [];
+
+  for (const fill of fills) {
+    const last = marks.at(-1);
+    if (last && last.side === fill.side && fill.tick - last.tick <= 8) {
+      const totalNotional = last.notional + fill.notional;
+      const totalShares = last.shares + fill.shares;
+      last.tick = fill.tick;
+      last.shares = totalShares;
+      last.notional = totalNotional;
+      last.price = totalShares > 0 ? totalNotional / totalShares : fill.price;
+      last.count += 1;
+    } else {
+      marks.push({
+        ...fill,
+        count: 1
+      });
+    }
+  }
+
+  return marks;
+}
+
+function findNearestTickPoint(points: TickPrice[], tick: number): TickPrice {
+  return points.reduce((nearest, point) => (Math.abs(point.tick - tick) < Math.abs(nearest.tick - tick) ? point : nearest), points[0]);
+}
+
+function formatIntradayTime(tick: number): string {
+  const clampedTick = Math.max(0, Math.min(GAME_CONFIG.ticksPerDay, tick));
+  const minutes = clampedTick <= 120 ? clampedTick : clampedTick <= 150 ? 120 : clampedTick - 30;
+  const totalMinutes = 9 * 60 + 30 + minutes;
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
 function createInitialUiGame(seed: string) {
@@ -1072,7 +1365,7 @@ function liquidityRisk(stock: Stock) {
   return "Low";
 }
 
-function quantHint(quantPresence: number, trace?: TickResult["stocks"][number]) {
+function quantHint(quantPresence: number, trace?: StockTraceView) {
   const sell = trace?.pressure.quantSellPressure ?? 0;
   const buy = trace?.pressure.quantBuyPressure ?? 0;
   if (sell > buy * 1.4 && sell > 0) return "Algo selling";

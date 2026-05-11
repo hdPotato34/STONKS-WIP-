@@ -1,6 +1,6 @@
 import { GAME_CONFIG } from "../game/config";
 import { syncDailyCandle } from "../game/charting";
-import type { GameEvent, GameState, HeatCauseTrace, PlayerAction, Pressure, Stock, StockTickTrace, TickResult } from "../game/types";
+import type { GameEvent, GameState, HeatCauseTrace, PlayerAction, Pressure, Stock, StockTickTrace, TickOptions, TickResult } from "../game/types";
 import { calculateRestingBuyVisibility, processPlayerOrdersForStock } from "../player/actions";
 import { recalculatePlayerNetWorth } from "../player/portfolio";
 import { executeAmbientTape } from "./ambientTape";
@@ -15,6 +15,8 @@ import { settleDay } from "./settlement";
 import { applyShrimpCollectiveEffects, calculateShrimpCollectivePressure } from "./shrimpCollectiveEngine";
 import { markAllWhalesToMarket } from "./whaleAccounting";
 import { createWhaleOrders, executeWhaleOrders } from "./whaleEngine";
+
+const EVENT_LOG_LIMIT = 2_000;
 
 export function advancePhase(game: GameState): string | undefined {
   if (game.phase === "preMarket") {
@@ -45,7 +47,7 @@ export function advancePhase(game: GameState): string | undefined {
   return undefined;
 }
 
-export function updateTick(game: GameState, playerActions: PlayerAction[] = []): TickResult {
+export function updateTick(game: GameState, playerActions: PlayerAction[] = [], options: TickOptions = {}): TickResult {
   const eventStart = game.eventLog.length;
   const resultDay = game.day;
   const resultTick = game.tick;
@@ -53,18 +55,18 @@ export function updateTick(game: GameState, playerActions: PlayerAction[] = []):
   let phaseChanged: string | undefined;
 
   if (game.phase === "ended") {
-    return buildTickResult(game, resultDay, resultTick, eventStart, stocks);
+    return buildTickResult(game, resultDay, resultTick, eventStart, stocks, undefined, options);
   }
 
   if (game.phase === "preMarket" || game.phase === "openingAuction") {
     phaseChanged = advancePhase(game);
-    return buildTickResult(game, resultDay, resultTick, eventStart, stocks, phaseChanged);
+    return buildTickResult(game, resultDay, resultTick, eventStart, stocks, phaseChanged, options);
   }
 
   if (game.phase === "closingAuction") {
     stocks = processMarketTick(game, playerActions);
     phaseChanged = advancePhase(game);
-    return buildTickResult(game, resultDay, resultTick, eventStart, stocks, phaseChanged);
+    return buildTickResult(game, resultDay, resultTick, eventStart, stocks, phaseChanged, options);
   }
 
   if (game.phase === "intraday") {
@@ -76,7 +78,7 @@ export function updateTick(game: GameState, playerActions: PlayerAction[] = []):
     }
   }
 
-  return buildTickResult(game, resultDay, resultTick, eventStart, stocks, phaseChanged);
+  return buildTickResult(game, resultDay, resultTick, eventStart, stocks, phaseChanged, options);
 }
 
 export function runTicks(game: GameState, count: number): TickResult[] {
@@ -405,17 +407,39 @@ function buildTickResult(
   tick: number,
   eventStart: number,
   stocks: StockTickTrace[],
-  phaseChanged?: string
+  phaseChanged?: string,
+  options: TickOptions = {}
 ): TickResult {
   const events = game.eventLog.slice(eventStart);
+  const fullDetail = options.detail === "full";
+  const playerFills = stocks.flatMap((stock) => stock.playerFills);
+  const whaleTrades = stocks.flatMap((stock) => stock.whaleTrades);
+  trimEventLog(game);
+
   return {
     day,
     tick,
     phase: game.phase,
     phaseChanged,
-    stocks,
-    playerFills: stocks.flatMap((stock) => stock.playerFills),
-    whaleTrades: stocks.flatMap((stock) => stock.whaleTrades),
-    events
+    stocks: fullDetail ? stocks : stocks.map(compactStockTrace),
+    playerFills,
+    whaleTrades,
+    events,
+    detail: fullDetail ? { stocks } : undefined
   };
+}
+
+function compactStockTrace(stock: StockTickTrace): StockTickTrace {
+  return {
+    ...stock,
+    playerFills: [],
+    restingOrders: [],
+    whaleTrades: [],
+    heatCauses: []
+  };
+}
+
+function trimEventLog(game: GameState): void {
+  if (game.eventLog.length <= EVENT_LOG_LIMIT) return;
+  game.eventLog = game.eventLog.slice(-EVENT_LOG_LIMIT);
 }

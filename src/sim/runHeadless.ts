@@ -24,8 +24,8 @@ for (const stock of Object.values(game.stocks)) {
 }
 
 const traceResults: TickResult[] = [];
-traceResults.push(updateTick(game));
-traceResults.push(updateTick(game));
+traceResults.push(updateTick(game, [], { detail: "full" }));
+traceResults.push(updateTick(game, [], { detail: "full" }));
 
 const attackTick = updateTick(game, [
   {
@@ -33,7 +33,7 @@ const attackTick = updateTick(game, [
     stockId: "DRAGON_SOFT",
     amountCash: 18_000_000
   }
-]);
+], { detail: "full" });
 traceResults.push(attackTick);
 
 const attackTrace = findStockTrace(attackTick, "DRAGON_SOFT");
@@ -62,11 +62,11 @@ for (const order of attackTrace.restingOrders) {
 }
 
 while (game.phase === "intraday") {
-  traceResults.push(updateTick(game));
+  traceResults.push(updateTick(game, [], { detail: "full" }));
 }
 
 if (game.phase === "closingAuction") {
-  traceResults.push(updateTick(game));
+  traceResults.push(updateTick(game, [], { detail: "full" }));
 }
 
 console.log("");
