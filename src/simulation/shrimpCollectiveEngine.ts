@@ -37,6 +37,8 @@ type MarketContext = {
   dayChangePct: number;
   openChangePct: number;
   lastTickMovePct: number;
+  openingGapPct: number;
+  openToNowPct: number;
   previousBoardWasHot: boolean;
   failedBoardFollowThrough: boolean;
   fightBack: boolean;
@@ -45,6 +47,7 @@ type MarketContext = {
   washoutScore: number;
   fearScore: number;
   boardChaseScore: number;
+  disagreementScore: number;
   limitProgressUp: number;
   limitProgressDown: number;
   upperGapPct: number;
@@ -53,8 +56,13 @@ type MarketContext = {
   panicCascade: boolean;
   supportFailure: boolean;
   resistanceScore: number;
+  heightFearScore: number;
+  gapFadeRisk: number;
+  postCrashAftershock: number;
   memoryReturn5d: number;
+  memoryReturn10d: number;
   upStreak: number;
+  greenDays5d: number;
   downStreak: number;
   boardBreaks5d: number;
   limitDownDays5d: number;
@@ -115,6 +123,9 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
   const limitPct = getLimitRatio(stock) * 100;
   const limitProgressUp = clamp(dayChangePct / Math.max(1, limitPct), 0, 1);
   const limitProgressDown = clamp(-dayChangePct / Math.max(1, limitPct), 0, 1);
+  const openingGapPct = memory.openingGapPct;
+  const openToNowPct = memory.openToNowPct;
+  const gapFadeRisk = clamp(Math.max(0, -openingGapPct - 0.6) * Math.max(0, openToNowPct - 0.8) * 2.8, 0, 42);
   const upperGapPct = ((upperLimit - stock.price) / Math.max(0.01, stock.previousClose)) * 100;
   const lowerGapPct = ((stock.price - lowerLimit) / Math.max(0.01, stock.previousClose)) * 100;
   const sector = game.sectors[stock.sector];
@@ -138,9 +149,11 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     stock.retail.gamblers * 0.12 +
     Math.max(0, sector.momentum) * 0.72 +
     Math.max(0, newsImpact) * 0.26 +
+    Math.max(0, openingGapPct) * 1.05 +
     Math.max(0, stock.momentum) * 0.12;
   const washoutScore =
     Math.max(0, -dayChangePct - 2.4) * 6.2 +
+    Math.max(0, -openingGapPct - 0.4) * 3.8 +
     Math.max(0, -valuation.valuationGap) * 42 +
     stock.retail.dipBuyers * 0.3 +
     stock.retail.bagholders * 0.12 -
@@ -150,11 +163,39 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     stock.retail.panicSellers * 0.28 +
     Math.max(0, -stock.momentum - 20) * 0.24 +
     Math.max(0, -dayChangePct - 4.2) * 3.4 +
+    Math.max(0, -openingGapPct - 1) * 2.4 +
     Math.max(0, -memory.return3d - 5) * 1.35 +
     Math.max(0, memory.downStreak - 1) * 3.8 +
     memory.boardBreaks5d * 3.4 +
     (memory.lastTickMovePct < -0.45 ? 5 : 0) +
     Math.max(0, -newsImpact) * 0.42;
+  const smoothRunnerBonus = memory.greenDays5d >= 4 && memory.realizedVolatility5d < 3.2 ? 8 : 0;
+  const sustainedClimbFactor = clamp(
+    0.45 + Math.max(0, memory.greenDays5d - 3) * 0.25 + Math.max(0, memory.upStreak - 2) * 0.18,
+    0.45,
+    1
+  );
+  const heightFearScore = clamp(
+    (Math.max(0, memory.return5d - 11) * 1.12 +
+      Math.max(0, memory.return10d - 18) * 0.56 +
+      Math.max(0, memory.ma5Deviation - 6.5) * 1.45) *
+      sustainedClimbFactor +
+      Math.max(0, memory.upStreak - 2) * 4.2 +
+      Math.max(0, memory.greenDays5d - 3) * 5.5 +
+      Math.max(0, valuation.valuationGap - 0.28) * 34 +
+      Math.max(0, stock.price / Math.max(0.01, stock.avgHolderCost) - 1.08) * 35 +
+      Math.max(0, openingGapPct - 1.6) * 3.4 +
+      gapFadeRisk * 0.7 +
+      smoothRunnerBonus -
+      Math.max(0, stock.retail.boardFaith - 70) * 0.12,
+    0,
+    80
+  );
+  const postCrashAftershock = clamp(
+    memory.limitDownDays5d * 8.5 + memory.boardBreaks5d * 3.2 + Math.max(0, -memory.drawdownFrom10dHigh - 18) * 0.36,
+    0,
+    38
+  );
   const boardChaseScore =
     storyScore +
     stock.retail.boardFaith * 0.22 +
@@ -162,7 +203,20 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     stock.heat * 0.08 +
     (previousBoardWasHot ? 18 : 0) +
     (stock.boardState === "attackingLimitUp" || stock.boardState === "weakSeal" ? 14 : 0) +
-    (stock.boardState === "sealedLimitUp" ? 12 : 0);
+    (stock.boardState === "sealedLimitUp" ? 12 : 0) -
+    heightFearScore * 0.2 -
+    postCrashAftershock * 0.82;
+  const disagreementScore = clamp(
+    Math.min(boardChaseScore, heightFearScore * 1.25) +
+      Math.min(stock.retail.greed, stock.retail.fear + heightFearScore * 0.45) * 0.22 +
+      Math.max(0, valuation.valuationGap - 0.38) * 22 +
+      Math.max(0, stock.heat - 50) * 0.28 +
+      Math.abs(openingGapPct) * 1.8 +
+      gapFadeRisk * 0.75 +
+      (previousBoardWasHot ? 8 : 0),
+    0,
+    100
+  );
   const supportFailure =
     dayChangePct < -2.1 &&
     !fightBack &&
@@ -176,7 +230,8 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     boardChaseScore > 61 &&
     limitProgressUp > 0.56 &&
     upperGapPct < limitPct * 0.32 &&
-    !supportFailure;
+    !supportFailure &&
+    (postCrashAftershock < 16 || (fightBack && limitProgressUp > 0.72));
   const resistanceScore =
     stock.costDistribution.deepProfit * 0.28 +
     stock.costDistribution.profit * 0.18 +
@@ -184,6 +239,8 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     Math.max(0, dayChangePct - 4) * 3.2 +
     Math.max(0, memory.return5d - 12) * 1.2 +
     Math.max(0, memory.upStreak - 3) * 4.8 +
+    heightFearScore * 0.38 +
+    gapFadeRisk * 0.55 +
     stock.heat * 0.12;
 
   return {
@@ -191,6 +248,8 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     dayChangePct,
     openChangePct,
     lastTickMovePct,
+    openingGapPct,
+    openToNowPct,
     previousBoardWasHot,
     failedBoardFollowThrough: previousBoardWasHot && (dayChangePct < -0.9 || openChangePct < -0.65),
     fightBack,
@@ -199,6 +258,7 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     washoutScore,
     fearScore,
     boardChaseScore,
+    disagreementScore,
     limitProgressUp,
     limitProgressDown,
     upperGapPct,
@@ -207,8 +267,13 @@ function buildContext(game: GameState, stock: Stock, newsImpact: number, valuati
     panicCascade,
     supportFailure,
     resistanceScore,
+    heightFearScore,
+    gapFadeRisk,
+    postCrashAftershock,
     memoryReturn5d: memory.return5d,
+    memoryReturn10d: memory.return10d,
     upStreak: memory.upStreak,
+    greenDays5d: memory.greenDays5d,
     downStreak: memory.downStreak,
     boardBreaks5d: memory.boardBreaks5d,
     limitDownDays5d: memory.limitDownDays5d
@@ -289,7 +354,10 @@ function updateCohortComposition(
       (context.tick < 70 && context.previousBoardWasHot ? 18 : 0) -
       (context.failedBoardFollowThrough ? 18 : 0) +
       (context.limitUpMagnet ? 30 : 0) -
-      (context.panicCascade ? 28 : 0);
+      (context.panicCascade ? 28 : 0) -
+      context.heightFearScore * 0.14 +
+      context.disagreementScore * 0.08 -
+      context.postCrashAftershock * 0.74;
     cohort.activity = moveToward(cohort.activity, targetActivity, 0.08 * eventSpeed, activityNoise);
     cohort.conviction = moveToward(cohort.conviction, targetActivity + stock.retail.boardFaith * 0.2, 0.07 * eventSpeed, convictionNoise);
   } else if (cohort.strategy === "momentumScalper") {
@@ -298,6 +366,8 @@ function updateCohortComposition(
       Math.abs(stock.momentum) * 0.42 +
       stock.microstructure.liquidityStress * 0.28 +
       stock.attention * 0.16 +
+      context.heightFearScore * 0.3 +
+      context.disagreementScore * 0.16 +
       (context.panicCascade || context.limitUpMagnet ? 14 : 0);
     cohort.activity = moveToward(cohort.activity, targetActivity, 0.07 * eventSpeed, activityNoise);
     cohort.conviction = moveToward(cohort.conviction, 38 + Math.abs(stock.momentum) * 0.32 + (context.fightBack ? 4 : 0), 0.05 * eventSpeed, convictionNoise);
@@ -314,6 +384,8 @@ function updateCohortComposition(
     const targetActivity =
       22 +
       context.fearScore * 0.58 +
+      context.heightFearScore * (context.lastTickMovePct < 0 || context.dayChangePct < 0 ? 0.28 : 0.08) +
+      context.disagreementScore * 0.16 +
       (context.noBidSlide ? 24 : 0) +
       (context.supportFailure ? 18 : 0) +
       (context.panicCascade ? 34 : 0) -
@@ -321,10 +393,21 @@ function updateCohortComposition(
     cohort.activity = moveToward(cohort.activity, targetActivity, 0.08 * eventSpeed, activityNoise);
     cohort.conviction = moveToward(cohort.conviction, targetActivity + stock.retail.fear * 0.14, 0.07 * eventSpeed, convictionNoise);
   } else if (cohort.strategy === "valueHolder") {
-    const valueSignal = Math.max(0, -valuation.valuationGap) * 45 + stock.financialHealth * 0.2 + Math.max(0, 15 - stock.pe) * 1.5;
+    const largeCapPatience = stock.marketCap > 50_000_000_000 ? 0.62 : 1;
+    const valuationBrake = valuation.valuationGap > 0.35 ? 0.38 : valuation.valuationGap > 0.15 ? 0.62 : 1;
+    const valueSignal =
+      (Math.max(0, -valuation.valuationGap) * 45 +
+        stock.financialHealth * (valuation.valuationGap > 0.12 ? 0.06 : 0.18) +
+        Math.max(0, 15 - stock.pe) * 1.5) *
+      valuationBrake *
+      largeCapPatience;
     cohort.activity = moveToward(
       cohort.activity,
-      18 + valueSignal + Math.max(0, -context.dayChangePct - 1.2) * 4 - (context.panicCascade && stock.financialHealth < 55 ? 10 : 0),
+      18 +
+        valueSignal +
+        Math.max(0, -context.dayChangePct - 1.2) * 4 +
+        context.heightFearScore * 0.22 -
+        (context.panicCascade && stock.financialHealth < 55 ? 10 : 0),
       0.035 * (context.fightBack ? 1.4 : 1),
       activityNoise * 0.35
     );
@@ -362,7 +445,7 @@ function calculateCohortIntent(
   const activeCapital = cohort.capital * clamp(cohort.activity / 100, 0.04, 1.25);
   const conviction = clamp(cohort.conviction / 100, 0.04, 1.25);
   const risk = clamp(cohort.riskAppetite / 100, 0.05, 1.25);
-  const noise = rng.float(-0.26, 0.26) + cohort.flowMemory / 420;
+  const noise = rng.float(-0.36, 0.36) + cohort.flowMemory / 420;
   const overvaluation = Math.max(0, valuation.valuationGap);
   let buyScore = 0;
   let sellScore = 0;
@@ -376,18 +459,23 @@ function calculateCohortIntent(
         : 0;
     buyScore =
       Math.max(0, context.boardChaseScore - 54) / 58 +
-      (context.previousBoardWasHot && gameTickEarly(context) ? 1.55 : 0) +
+      (context.previousBoardWasHot && gameTickEarly(context) && context.postCrashAftershock < 18 ? 1.55 : 0) +
       (stock.boardState === "sealedLimitUp" ? 0.55 : stock.boardState === "attackingLimitUp" ? 0.35 : 0) +
       magnetBid +
       Math.max(0, stock.microstructure.flowMemory) / 180 +
+      context.disagreementScore / 260 +
       noise -
-      (context.previousBoardWasHot ? overvaluation * 0.18 : overvaluation * 0.52);
+      (context.previousBoardWasHot ? overvaluation * 0.18 : overvaluation * 0.52) -
+      context.postCrashAftershock / 38;
     sellScore =
       (context.failedBoardFollowThrough ? 0.46 : 0) +
       (context.supportFailure ? 0.46 : 0) +
       (context.panicCascade ? 0.38 : 0) +
       Math.max(0, context.memoryReturn5d - 14) / 28 +
       Math.max(0, context.upStreak - 4) * 0.16 +
+      context.heightFearScore / 95 +
+      context.disagreementScore / 170 +
+      context.gapFadeRisk / 52 +
       Math.max(0, -context.openChangePct - 0.45) / 3.2 +
       Math.max(0, -stock.microstructure.flowMemory - 8) / 120 -
       (context.fightBack ? 0.18 : 0);
@@ -399,6 +487,8 @@ function calculateCohortIntent(
       Math.max(0, context.lastTickMovePct) * 5 +
       Math.max(0, stock.microstructure.flowMemory) / 150 +
       (context.limitUpMagnet ? 0.45 : 0) +
+      context.heightFearScore / 180 +
+      context.disagreementScore / 230 +
       noise -
       overvaluation * 0.34;
     sellScore =
@@ -408,6 +498,9 @@ function calculateCohortIntent(
       (context.panicCascade ? 0.64 + context.limitProgressDown * 0.65 : 0) +
       Math.max(0, context.downStreak - 1) * 0.2 +
       Math.max(0, -context.memoryReturn5d - 7) / 26 +
+      context.heightFearScore / 85 +
+      context.disagreementScore / 150 +
+      context.gapFadeRisk / 46 +
       overvaluation * 0.22 -
       noise;
     urgency = context.panicCascade || context.limitUpMagnet ? 1.65 : 0.9;
@@ -453,25 +546,32 @@ function calculateCohortIntent(
     note = context.noBidSlide ? "panic cutters are accelerating into weak bids" : "nervous holders are trimming risk";
   } else if (cohort.strategy === "valueHolder") {
     const panicDiscount = context.panicCascade && !context.fightBack && valuation.valuationGap > -0.28 ? 0.46 : 1;
+    const largeCapPatience = stock.marketCap > 50_000_000_000 ? 0.68 : 1;
+    const overvaluationBrake = clamp(1 - Math.max(0, valuation.valuationGap - 0.08) * (stock.marketCap > 50_000_000_000 ? 2.4 : 1.6), 0.08, 1);
     buyScore =
       (Math.max(0, -valuation.valuationGap) * 0.9 +
         Math.max(0, 14 - stock.pe) / 18 +
         Math.max(0, -context.dayChangePct - 0.6) / 10 +
         Math.min(0.35, stock.microstructure.liquidityStress / 180) +
-        stock.financialHealth / 250 +
+        stock.financialHealth / (stock.marketCap > 50_000_000_000 ? 420 : 250) +
         (context.fightBack ? 0.22 : 0) +
         noise * 0.25) *
-      panicDiscount;
+      panicDiscount *
+      largeCapPatience *
+      overvaluationBrake;
     sellScore =
-      Math.max(0, valuation.valuationGap - 0.35) * 0.58 +
+      Math.max(0, valuation.valuationGap - (stock.marketCap > 50_000_000_000 ? 0.18 : 0.35)) *
+        (stock.marketCap > 50_000_000_000 ? 0.82 : 0.58) +
       Math.max(0, context.dayChangePct - 5) / 16 +
+      context.heightFearScore / 80 +
+      context.gapFadeRisk / 58 +
       Math.max(0, 38 - stock.financialHealth) / 180;
     urgency = context.fightBack ? 1.15 : 0.65;
     note = buyScore > sellScore ? "value holders are adding into weakness" : "long-term holders are lightening an expensive move";
   } else {
-    const randomLean = rng.float(-1, 1);
+    const randomLean = rng.float(-1.28, 1.28);
     const meanReversion = -context.dayChangePct / 34;
-    const eventLean = context.panicCascade ? -0.55 : context.limitUpMagnet ? 0.42 : 0;
+    const eventLean = (context.panicCascade ? -0.55 : context.limitUpMagnet ? 0.42 : 0) - context.heightFearScore / 200;
     buyScore = Math.max(0, randomLean + meanReversion + noise + eventLean);
     sellScore = Math.max(0, -randomLean - meanReversion - noise - eventLean);
     urgency = context.panicCascade || context.limitUpMagnet ? 1.35 : 0.9;
@@ -585,7 +685,13 @@ function getCohortCapitalTarget(cohort: ShrimpCohort, stock: Stock, context: Mar
     return stock.baseLiquidity * (0.45 + stock.retail.bagholders / 120 + stock.retail.panicSellers / 130 + (context.panicCascade ? 0.48 : 0));
   }
   if (cohort.strategy === "valueHolder") {
-    return stock.baseLiquidity * (0.7 + stock.financialHealth / 95 + Math.max(0, 14 - stock.pe) / 20) * (stock.marketCap > 50_000_000_000 ? 1.3 : 0.9);
+    const valuationBrake = stock.pe > stock.fairPe * 1.25 ? 0.46 : stock.pe > stock.fairPe * 1.08 ? 0.68 : 1;
+    return (
+      stock.baseLiquidity *
+      (0.7 + stock.financialHealth / 95 + Math.max(0, 14 - stock.pe) / 20) *
+      (stock.marketCap > 50_000_000_000 ? 0.82 : 0.9) *
+      valuationBrake
+    );
   }
   return stock.baseLiquidity * (0.58 + stock.attention / 180);
 }
@@ -604,9 +710,11 @@ function calculateLegacyCrowdPressure(
   const themeBurstChance = clamp((context.boardChaseScore - 66) / 190 + stock.retail.gamblers / 1_500, 0.006, 0.14);
   const washoutBurstChance = clamp((context.washoutScore - 36) / 170 + stock.retail.dipBuyers / 1_200, 0.01, 0.16);
   const panicBurstChance = clamp((context.fearScore - 50) / 150 + (context.panicCascade ? 0.22 : 0) + stock.retail.panicSellers / 1_400, 0.015, 0.36);
+  const heightBurstChance = clamp((context.heightFearScore - 18) / 160 + Math.max(0, context.greenDays5d - 3) * 0.018, 0.015, 0.28);
   const themeBurst = rng.chance(themeBurstChance + (context.limitUpMagnet ? 0.12 : 0));
   const washoutBurst = rng.chance(washoutBurstChance);
   const panicBurst = rng.chance(panicBurstChance);
+  const heightBurst = rng.chance(heightBurstChance);
   const distressedDiscount =
     stock.financialHealth < 42 &&
     valuation.valuationGap < -0.12 &&
@@ -626,10 +734,23 @@ function calculateLegacyCrowdPressure(
   }
 
   if (context.boardChaseScore > 62 && stock.boardState !== "limitDown") {
-    const burstScale = context.limitUpMagnet ? rng.float(1.15, 2.6) : themeBurst ? rng.float(1.35, 2.5) : 0.12;
+    const freshBoardFollowThrough =
+      context.previousBoardWasHot &&
+      context.tick < 130 &&
+      context.dayChangePct > -4.5 &&
+      stock.retail.boardFaith > 68 &&
+      context.postCrashAftershock < 18;
+    const burstScale = context.limitUpMagnet
+      ? rng.float(1.15, 2.6)
+      : themeBurst
+        ? rng.float(1.35, 2.5)
+        : freshBoardFollowThrough
+          ? rng.float(0.5, 0.95)
+          : 0.12;
     const qualityBrake = valuation.valuationGap > 0.7 && stock.financialHealth < 55 ? 0.55 : 1;
+    const heightBrake = clamp(1 - context.heightFearScore / 160, 0.65, 1);
     const magnetBoost = context.limitUpMagnet ? 1 + context.limitProgressUp * 0.8 + Math.max(0, 2.5 - context.upperGapPct) / 4 : 1;
-    const chase = stock.currentLiquidity * ((context.boardChaseScore - 62) / 70) * 0.2 * burstScale * qualityBrake * magnetBoost;
+    const chase = stock.currentLiquidity * ((context.boardChaseScore - 62) / 70) * 0.2 * burstScale * qualityBrake * heightBrake * magnetBoost;
     buyPressure += chase;
     heatDelta += themeBurst || context.limitUpMagnet ? 0.46 : 0.06;
     sentimentDelta += themeBurst || context.limitUpMagnet ? 0.24 : 0.04;
@@ -646,6 +767,19 @@ function calculateLegacyCrowdPressure(
     sentimentDelta += washoutBurst ? 0.22 : 0.04;
     attentionDelta += washoutBurst ? 0.26 : 0.08;
     notes.push(washoutBurst ? "dip buyers are organizing around a washout" : "dip buyers are quietly absorbing fear");
+  }
+
+  if (context.previousBoardWasHot && context.dayChangePct < -1.4 && context.dayChangePct > -8.8 && stock.boardState !== "limitDown") {
+    const bargainDebate = rng.chance(0.38 + stock.retail.boardFaith / 420);
+    const failedBoardBid =
+      stock.currentLiquidity *
+      (0.045 + stock.retail.boardFaith / 1_800 + stock.retail.dipBuyers / 2_200 + Math.max(0, -context.dayChangePct - 1.2) / 120) *
+      (bargainDebate ? rng.float(1.2, 2.1) : 0.65);
+    buyPressure += failedBoardBid;
+    heatDelta += bargainDebate ? 0.12 : 0.05;
+    sentimentDelta += bargainDebate ? 0.08 : 0.03;
+    attentionDelta += 0.08;
+    if (failedBoardBid > stock.currentLiquidity * 0.06) notes.push("post-board dip buyers are arguing with profit takers");
   }
 
   if (distressedDiscount) {
@@ -680,13 +814,42 @@ function calculateLegacyCrowdPressure(
   }
 
   if (context.memoryReturn5d > 12 || context.upStreak >= 4) {
+    const freshBoardBrake = context.previousBoardWasHot && context.upStreak <= 1 && context.dayChangePct > -5 ? 0.62 : 1;
     const crowdedExit =
       stock.currentLiquidity *
-      (Math.max(0, context.memoryReturn5d - 10) / 58 + Math.max(0, context.upStreak - 3) * 0.035 + context.resistanceScore / 1_200);
+      (Math.max(0, context.memoryReturn5d - 10) / 58 +
+        Math.max(0, context.memoryReturn10d - 18) / 92 +
+        Math.max(0, context.upStreak - 3) * 0.035 +
+        context.heightFearScore / 520 +
+        context.resistanceScore / 1_200) *
+      freshBoardBrake;
     sellPressure += crowdedExit;
     heatDelta += crowdedExit > stock.currentLiquidity * 0.08 ? 0.18 : 0.06;
     sentimentDelta -= crowdedExit > stock.currentLiquidity * 0.1 ? 0.12 : 0.04;
     if (crowdedExit > stock.currentLiquidity * 0.08) notes.push("multi-day winners are meeting supply");
+  }
+
+  if (context.heightFearScore > 20) {
+    const burstScale = heightBurst ? rng.float(0.24, 0.46) : 0.11;
+    const fastMoneySupply = stock.currentLiquidity * ((context.heightFearScore - 16) / 96) * burstScale;
+    sellPressure += fastMoneySupply;
+    heatDelta += heightBurst ? 0.22 : 0.08;
+    sentimentDelta -= heightBurst ? 0.16 : 0.06;
+    attentionDelta += heightBurst ? 0.12 : 0.03;
+    if (fastMoneySupply > stock.currentLiquidity * 0.06) notes.push("fast money is taking profits into height fear");
+  }
+
+  if (context.disagreementScore > 18) {
+    const debateScale = rng.float(0.14, 0.34) * (context.previousBoardWasHot ? 1.15 : 1);
+    const twoWayBase = stock.currentLiquidity * ((context.disagreementScore - 14) / 110) * debateScale;
+    const chaseSide = twoWayBase * clamp(0.65 + stock.retail.boardFaith / 140 + Math.max(0, context.dayChangePct) / 28, 0.65, 1.45);
+    const fearSide = twoWayBase * clamp(0.8 + context.heightFearScore / 90 + Math.max(0, valuation.valuationGap - 0.45) * 0.8, 0.8, 1.75);
+    buyPressure += chaseSide;
+    sellPressure += fearSide;
+    heatDelta += 0.08;
+    sentimentDelta += clamp((chaseSide - fearSide) / Math.max(1, stock.currentLiquidity) * 0.32, -0.12, 0.1);
+    attentionDelta += 0.1;
+    if (Math.max(chaseSide, fearSide) > stock.currentLiquidity * 0.05) notes.push("greed and height fear are splitting the tape");
   }
 
   const crowdedStrength =
@@ -697,8 +860,9 @@ function calculateLegacyCrowdPressure(
     stock.retail.greed > 68 ||
     stock.heat > 62;
   if (context.dayChangePct > 6 || (valuation.valuationGap > 0.55 && crowdedStrength)) {
+    const freshBoardBrake = context.previousBoardWasHot && context.upStreak <= 1 && context.dayChangePct > -5 ? 0.7 : 1;
     const profitTaking =
-      stock.currentLiquidity * (Math.max(0, context.dayChangePct - 5.5) / 46 + Math.max(0, valuation.valuationGap - 0.42)) * 0.11;
+      stock.currentLiquidity * (Math.max(0, context.dayChangePct - 5.5) / 46 + Math.max(0, valuation.valuationGap - 0.42)) * 0.11 * freshBoardBrake;
     sellPressure += profitTaking;
     heatDelta += 0.08;
     if (profitTaking > stock.currentLiquidity * 0.08) notes.push("fast money is taking profits into strength");

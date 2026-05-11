@@ -24,9 +24,9 @@ export function getMarketCapClass(stock: Stock): MarketCapClass {
 
 export function calculateEffectiveDepth(stock: Stock): number {
   const capClass = getMarketCapClass(stock);
-  const capMultiplier = capClass === "small" ? 0.5 : capClass === "mid" ? 0.95 : 1.65;
+  const capMultiplier = capClass === "small" ? 0.5 : capClass === "mid" ? 0.95 : 2.65;
   const floatValue = stock.floatShares * stock.price;
-  const floatDepthRatio = capClass === "small" ? 0.008 : capClass === "mid" ? 0.006 : 0.004;
+  const floatDepthRatio = capClass === "small" ? 0.008 : capClass === "mid" ? 0.006 : 0.012;
   const floatDepthCeiling = floatValue * floatDepthRatio;
 
   return roundMoney(Math.max(500_000, Math.min(stock.currentLiquidity * capMultiplier, floatDepthCeiling)));

@@ -31,10 +31,11 @@ export function createInitialShrimpCohorts(stock: StockForShrimp): ShrimpCohort[
   const trappedTilt = clamp((stock.retail.bagholders + stock.retail.panicSellers + stock.costDistribution.loss - 85) / 130, 0, 1);
   const momentumTilt = clamp((stock.retail.momentum + stock.quantPresence + Math.abs(stock.momentum) - 70) / 135, 0, 1);
   const smallCapBoost = stock.marketCap < 10_000_000_000 ? 1.18 : stock.marketCap > 50_000_000_000 ? 0.72 : 1;
-  const largeCapValueBoost = stock.marketCap > 50_000_000_000 ? 1.25 : 0.88;
+  const largeCapValueBoost = stock.marketCap > 50_000_000_000 ? 0.86 : 0.88;
   const capitalBase =
     stock.baseLiquidity *
-    (1.8 + stock.attention / 80 + stock.retail.attention / 120 + stock.retail.bagholders / 180);
+    (1.8 + stock.attention / 80 + stock.retail.attention / 120 + stock.retail.bagholders / 180) *
+    (stock.marketCap > 50_000_000_000 ? 0.78 : 1);
 
   const seeds: CohortSeed[] = [
     {

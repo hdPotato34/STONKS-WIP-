@@ -17,11 +17,12 @@ export function updateRetailProfile(stock: Stock): void {
   const neutralFear = clamp(48 - stock.sentiment * 0.18 - stock.financialHealth * 0.06, 18, 62);
 
   if (stock.boardState === "sealedLimitUp") {
-    retail.greed = clamp(retail.greed + 1.3, 0, 100);
-    retail.attention = clamp(retail.attention + 1.1, 0, 100);
-    retail.boardFaith = clamp(retail.boardFaith + 1.8, 0, 100);
-    retail.fear = clamp(retail.fear - 1.2, 0, 100);
-    retail.panicSellers = clamp(retail.panicSellers - 1.1, 0, 100);
+    const trauma = clamp((retail.fear + retail.panicSellers - retail.greed * 0.25 + stock.heat * 0.18) / 175, 0, 0.82);
+    retail.greed = clamp(retail.greed + 0.08 + 0.32 * (1 - trauma), 0, 100);
+    retail.attention = clamp(retail.attention + 0.28 + 0.22 * (1 - trauma), 0, 100);
+    retail.boardFaith = clamp(retail.boardFaith + 0.1 + 0.42 * (1 - trauma), 0, 100);
+    retail.fear = clamp(retail.fear - (0.035 + 0.26 * (1 - trauma)), 0, 100);
+    retail.panicSellers = clamp(retail.panicSellers - (0.03 + 0.22 * (1 - trauma)), 0, 100);
   } else if (stock.boardState === "weakSeal") {
     retail.greed = clamp(retail.greed + 0.35, 0, 100);
     retail.fear = clamp(retail.fear + 1.4, 0, 100);
@@ -74,13 +75,14 @@ export function applyBoardStateTransitionEffects(stock: Stock, previousState: st
   const retail = stock.retail;
 
   if (stock.boardState === "sealedLimitUp") {
-    retail.greed = clamp(retail.greed + 3.5, 0, 100);
-    retail.attention = clamp(retail.attention + 3, 0, 100);
-    retail.boardFaith = clamp(retail.boardFaith + 6, 0, 100);
-    retail.fear = clamp(retail.fear - 4, 0, 100);
-    retail.panicSellers = clamp(retail.panicSellers - 2.5, 0, 100);
-    stock.sentiment = clamp(stock.sentiment + 3, 0, 100);
-    stock.attention = clamp(stock.attention + 2.2, 0, 100);
+    const trauma = clamp((retail.fear + retail.panicSellers - retail.greed * 0.2 + stock.heat * 0.16) / 165, 0, 0.85);
+    retail.greed = clamp(retail.greed + 1.1 + 2.4 * (1 - trauma), 0, 100);
+    retail.attention = clamp(retail.attention + 1.4 + 1.6 * (1 - trauma), 0, 100);
+    retail.boardFaith = clamp(retail.boardFaith + 1.8 + 4.2 * (1 - trauma), 0, 100);
+    retail.fear = clamp(retail.fear - (0.8 + 3.2 * (1 - trauma)), 0, 100);
+    retail.panicSellers = clamp(retail.panicSellers - (0.55 + 1.95 * (1 - trauma)), 0, 100);
+    stock.sentiment = clamp(stock.sentiment + 1 + 2 * (1 - trauma), 0, 100);
+    stock.attention = clamp(stock.attention + 0.8 + 1.4 * (1 - trauma), 0, 100);
   }
 
   if (stock.boardState === "weakSeal") {

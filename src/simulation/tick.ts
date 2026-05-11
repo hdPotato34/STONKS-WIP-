@@ -1,5 +1,6 @@
-import { GAME_CONFIG } from "../game/config";
+import { clamp, GAME_CONFIG } from "../game/config";
 import { syncDailyCandle } from "../game/charting";
+import type { ValuationSnapshot } from "../game/fundamentals";
 import type { GameEvent, GameState, HeatCauseTrace, PlayerAction, Pressure, Stock, StockTickTrace, TickOptions, TickResult } from "../game/types";
 import { calculateRestingBuyVisibility, processPlayerOrdersForStock } from "../player/actions";
 import { recalculatePlayerNetWorth } from "../player/portfolio";
@@ -13,6 +14,7 @@ import { calculateQuantPressure } from "./quantEngine";
 import { applyBoardStateTransitionEffects, calculateRetailPressure, updateRetailProfile } from "./retailEngine";
 import { settleDay } from "./settlement";
 import { applyShrimpCollectiveEffects, calculateShrimpCollectivePressure } from "./shrimpCollectiveEngine";
+import { getMarketMemory } from "./marketMemory";
 import { markAllWhalesToMarket } from "./whaleAccounting";
 import { createWhaleOrders, executeWhaleOrders } from "./whaleEngine";
 
@@ -110,7 +112,7 @@ function processMarketTick(game: GameState, playerActions: PlayerAction[]): Stoc
     const collective = calculateShrimpCollectivePressure(game, stock, news.impact, fundamental.valuation);
     applyShrimpCollectiveEffects(stock, collective);
     const initialQuant = calculateQuantPressure(game, stock, news.impact, getRestingVisibility(game, stock));
-    const institution = calculateInstitutionPressure(stock);
+    const institution = calculateInstitutionPressure(game, stock, fundamental.valuation);
     const basePressure = createPressure(game, stock, {
       retailBuyPressure: retail.buyPressure,
       retailSellPressure: retail.sellPressure,
@@ -214,11 +216,26 @@ function processMarketTick(game: GameState, playerActions: PlayerAction[]): Stoc
   return traces;
 }
 
-function calculateInstitutionPressure(stock: Stock): { buyPressure: number; sellPressure: number } {
+function calculateInstitutionPressure(game: GameState, stock: Stock, valuation: ValuationSnapshot): { buyPressure: number; sellPressure: number } {
+  const memory = getMarketMemory(game, stock);
   const institutionBias = (stock.financialHealth - 50) * (stock.institutionPresence / 100);
+  const overvaluation = Math.max(0, valuation.valuationGap);
+  const undervaluation = Math.max(0, -valuation.valuationGap);
+  const overrunSupply =
+    stock.currentLiquidity *
+    (stock.institutionPresence / 100) *
+    (Math.max(0, overvaluation - 0.18) * 0.11 +
+      Math.max(0, memory.return10d - 28) * 0.0018 +
+      Math.max(0, memory.ma5Deviation - 7) * 0.0022 +
+      Math.max(0, memory.openToNowPct - 2.5) * 0.004);
+  const discountSupport =
+    stock.currentLiquidity *
+    (stock.institutionPresence / 100) *
+    Math.max(0, undervaluation - 0.08) *
+    (stock.financialHealth > 55 ? 0.04 : 0.018);
   return {
-    buyPressure: Math.max(0, institutionBias) * 16_000,
-    sellPressure: Math.max(0, -institutionBias) * 16_000
+    buyPressure: Math.max(0, institutionBias) * 16_000 * clamp(1 - overvaluation * 1.9, 0.02, 1) + discountSupport,
+    sellPressure: Math.max(0, -institutionBias) * 16_000 + overrunSupply
   };
 }
 

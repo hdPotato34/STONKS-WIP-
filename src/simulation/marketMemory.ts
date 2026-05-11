@@ -4,8 +4,10 @@ export type MarketMemorySnapshot = {
   return1d: number;
   return3d: number;
   return5d: number;
+  return10d: number;
   upStreak: number;
   downStreak: number;
+  greenDays5d: number;
   realizedVolatility5d: number;
   drawdownFrom10dHigh: number;
   ma5Deviation: number;
@@ -13,6 +15,8 @@ export type MarketMemorySnapshot = {
   limitDownDays5d: number;
   boardBreaks5d: number;
   lastTickMovePct: number;
+  openingGapPct: number;
+  openToNowPct: number;
 };
 
 const hotBoardStates: BoardState[] = ["attackingLimitUp", "sealedLimitUp", "weakSeal"];
@@ -36,15 +40,19 @@ export function getMarketMemory(game: GameState, stock: Stock): MarketMemorySnap
     return1d: percentChange(currentClose, stock.previousClose),
     return3d: getWindowReturn(closes, 3),
     return5d: getWindowReturn(closes, 5),
+    return10d: getWindowReturn(closes, 10),
     upStreak: countStreak(tape, 1),
     downStreak: countStreak(tape, -1),
+    greenDays5d: recent5.filter((candle) => percentChange(candle.close, candle.open) > 0.15).length,
     realizedVolatility5d: standardDeviation(recentReturns),
     drawdownFrom10dHigh: high10 > 0 ? percentChange(currentClose, high10) : 0,
     ma5Deviation: ma5 > 0 ? percentChange(currentClose, ma5) : 0,
     limitUpDays5d: recent5.filter((candle) => hotBoardStates.includes(candle.boardState)).length,
     limitDownDays5d: recent5.filter((candle) => candle.boardState === "limitDown").length,
     boardBreaks5d: recent5.filter((candle) => weakBoardStates.includes(candle.boardState)).length,
-    lastTickMovePct: percentChange(lastPrint, previousPrint)
+    lastTickMovePct: percentChange(lastPrint, previousPrint),
+    openingGapPct: percentChange(stock.open, stock.previousClose),
+    openToNowPct: percentChange(currentClose, stock.open)
   };
 }
 

@@ -4,6 +4,7 @@ import { calculateFairPe, deriveProfitGrowth, getValuationSnapshot, updateValuat
 import { createRng } from "../game/rng";
 import type { GameState, Stock } from "../game/types";
 import { recalculatePlayerNetWorth } from "../player/portfolio";
+import { getLowerLimit, getUpperLimit } from "./boardEngine";
 import { getMarketMemory } from "./marketMemory";
 import { markAllWhalesToMarket } from "./whaleAccounting";
 
@@ -70,6 +71,7 @@ function settleStock(game: GameState, stock: Stock, nextDay: number): void {
   syncDailyCandle(stock, game.day);
   const memory = getMarketMemory(game, stock);
   const closeMovePct = stock.open > 0 ? ((stock.price - stock.open) / stock.open) * 100 : 0;
+  const closingBoardState = stock.boardState;
   stock.previousClose = stock.price;
   stock.open = stock.price;
   stock.high = stock.price;
@@ -131,10 +133,17 @@ function settleStock(game: GameState, stock: Stock, nextDay: number): void {
   applyDailyCircumstance(game, stock, nextDay, {
     closeMovePct,
     return5d: memory.return5d,
+    return10d: memory.return10d,
     realizedVolatility5d: memory.realizedVolatility5d,
     upStreak: memory.upStreak,
+    greenDays5d: memory.greenDays5d,
     downStreak: memory.downStreak,
-    drawdownFrom10dHigh: memory.drawdownFrom10dHigh
+    drawdownFrom10dHigh: memory.drawdownFrom10dHigh,
+    ma5Deviation: memory.ma5Deviation,
+    valuationGap: valuation.valuationGap,
+    limitUpDays5d: memory.limitUpDays5d,
+    limitDownDays5d: memory.limitDownDays5d,
+    closingBoardState
   });
 }
 
@@ -145,17 +154,32 @@ function applyDailyCircumstance(
   memory: {
     closeMovePct: number;
     return5d: number;
+    return10d: number;
     realizedVolatility5d: number;
     upStreak: number;
+    greenDays5d: number;
     downStreak: number;
     drawdownFrom10dHigh: number;
+    ma5Deviation: number;
+    valuationGap: number;
+    limitUpDays5d: number;
+    limitDownDays5d: number;
+    closingBoardState: Stock["boardState"];
   }
 ): void {
   const rng = createRng(`${game.rngSeed}:daily-circumstance:${nextDay}:${stock.id}`);
   const sector = game.sectors[stock.sector];
   const moodShock = rng.float(-5.5, 5.5) + (sector.momentum / 100) * 3;
   const liquidityShock = rng.float(-0.16, 0.18) + Math.min(0.12, Math.abs(memory.closeMovePct) / 80 + memory.realizedVolatility5d / 160);
-  const overrunFatigue = Math.max(0, memory.return5d - 18) * 0.22 + Math.max(0, memory.upStreak - 3) * 1.25;
+  const overrunFatigue =
+    Math.max(0, memory.return5d - 14) * 0.17 +
+    Math.max(0, memory.return10d - 22) * 0.07 +
+    Math.max(0, memory.upStreak - 2) * 0.95 +
+    Math.max(0, memory.greenDays5d - 3) * 0.9 +
+    Math.max(0, memory.ma5Deviation - 6) * 0.22 +
+    (memory.return5d > 8 || memory.greenDays5d >= 4
+      ? Math.max(0, memory.valuationGap - 0.5) * (memory.limitUpDays5d > 0 ? 0.75 : 2.2)
+      : 0);
   const washoutAttention = Math.max(0, -memory.drawdownFrom10dHigh - 9) * 0.42 + Math.max(0, memory.downStreak - 1) * 2.4;
 
   stock.attention = clamp(stock.attention + moodShock * 0.65 + washoutAttention + Math.abs(memory.closeMovePct) * 0.18, 0, 100);
@@ -163,16 +187,42 @@ function applyDailyCircumstance(
   stock.heat = clamp(stock.heat + Math.abs(moodShock) * 0.18 + overrunFatigue * 0.16 + washoutAttention * 0.04, 0, GAME_CONFIG.maxStockHeat);
   stock.currentLiquidity = Math.max(1_000_000, stock.baseLiquidity * (1 + liquidityShock));
   stock.retail.greed = clamp(stock.retail.greed + moodShock * 0.28 - overrunFatigue * 0.32 + washoutAttention * 0.18, 0, 100);
-  stock.retail.dipBuyers = clamp(stock.retail.dipBuyers + washoutAttention * 0.42 + Math.max(0, -memory.closeMovePct - 4) * 0.26, 0, 100);
-  stock.retail.fear = clamp(stock.retail.fear - moodShock * 0.22 + washoutAttention * 0.08 + Math.max(0, -memory.closeMovePct - 4) * 0.16, 0, 100);
-  stock.retail.panicSellers = clamp(stock.retail.panicSellers + washoutAttention * 0.04 + Math.max(0, -memory.closeMovePct - 5) * 0.12, 0, 100);
+  stock.retail.dipBuyers = clamp(
+    stock.retail.dipBuyers + washoutAttention * 0.42 + Math.max(0, -memory.closeMovePct - 4) * 0.26 - overrunFatigue * 0.05,
+    0,
+    100
+  );
+  stock.retail.fear = clamp(
+    stock.retail.fear - moodShock * 0.22 + washoutAttention * 0.08 + Math.max(0, -memory.closeMovePct - 4) * 0.16 + overrunFatigue * 0.22,
+    0,
+    100
+  );
+  stock.retail.panicSellers = clamp(
+    stock.retail.panicSellers + washoutAttention * 0.04 + Math.max(0, -memory.closeMovePct - 5) * 0.12 + overrunFatigue * 0.08,
+    0,
+    100
+  );
+  const gapPct = applyOpeningAuctionGap(stock, nextDay, rng, moodShock, overrunFatigue, washoutAttention, memory);
+  stock.attention = clamp(stock.attention + Math.abs(gapPct) * 0.72, 0, 100);
+  stock.heat = clamp(stock.heat + Math.abs(gapPct) * 0.32, 0, GAME_CONFIG.maxStockHeat);
+  stock.sentiment = clamp(stock.sentiment + gapPct * 0.32, 0, 100);
+  if (gapPct > 0) {
+    stock.retail.greed = clamp(stock.retail.greed + gapPct * 0.82, 0, 100);
+    stock.retail.boardFaith = clamp(stock.retail.boardFaith + gapPct * 0.48, 0, 100);
+  } else if (gapPct < 0) {
+    stock.retail.fear = clamp(stock.retail.fear + Math.abs(gapPct) * 1.4, 0, 100);
+    stock.retail.panicSellers = clamp(stock.retail.panicSellers + Math.abs(gapPct) * 0.72, 0, 100);
+    stock.retail.dipBuyers = clamp(stock.retail.dipBuyers + Math.abs(gapPct) * 0.65, 0, 100);
+  }
   if (memory.drawdownFrom10dHigh < -24 && stock.retail.fear < 25) {
     stock.heat = clamp(stock.heat * 0.72, 0, GAME_CONFIG.maxStockHeat);
   }
 
-  if (Math.abs(moodShock) > 4.4 || overrunFatigue > 3 || washoutAttention > 3.2) {
+  if (Math.abs(moodShock) > 4.4 || overrunFatigue > 3 || washoutAttention > 3.2 || Math.abs(gapPct) > 1.4) {
     const message =
-      overrunFatigue > washoutAttention && overrunFatigue > 3
+      Math.abs(gapPct) > 1.4
+        ? `${stock.name} opens ${gapPct > 0 ? "above" : "below"} yesterday's close after the auction imbalance.`
+        : overrunFatigue > washoutAttention && overrunFatigue > 3
         ? `${stock.name} opens with rally fatigue after a multi-day run.`
         : washoutAttention > 3.2
           ? `${stock.name} opens with bargain hunters watching the drawdown.`
@@ -187,6 +237,89 @@ function applyDailyCircumstance(
       message
     });
   }
+}
+
+function applyOpeningAuctionGap(
+  stock: Stock,
+  nextDay: number,
+  rng: ReturnType<typeof createRng>,
+  moodShock: number,
+  overrunFatigue: number,
+  washoutAttention: number,
+  memory: {
+    closeMovePct: number;
+    return5d: number;
+    drawdownFrom10dHigh: number;
+    valuationGap: number;
+    limitUpDays5d: number;
+    limitDownDays5d: number;
+    closingBoardState: Stock["boardState"];
+  }
+): number {
+  const randomGap = rng.float(-0.95, 0.95) + rng.float(-0.55, 0.55);
+  const trendContinuation = clamp(memory.closeMovePct * 0.08, -1.4, 1.4);
+  const richFatigue = Math.max(0, memory.valuationGap - 0.38) * (memory.return5d > 8 ? 1.25 : 0.5);
+  const fatigueGap =
+    overrunFatigue > 2.5
+      ? rng.chance(0.38)
+        ? rng.float(0.08, 0.28) * overrunFatigue
+        : -rng.float(0.08, 0.22) * overrunFatigue
+      : -overrunFatigue * 0.16;
+  const boardCarry =
+    memory.closingBoardState === "sealedLimitUp"
+      ? rng.float(0.25, 1.45)
+      : memory.closingBoardState === "weakSeal" || memory.closingBoardState === "attackingLimitUp"
+        ? rng.float(-0.55, 0.95)
+        : memory.closingBoardState === "limitDown"
+          ? -rng.float(0.7, memory.limitDownDays5d >= 2 ? 2.2 : 3.5)
+          : memory.closingBoardState === "panic" || memory.closingBoardState === "brokenBoard"
+            ? -rng.float(0.3, 1.8)
+            : 0;
+  const repeatedLimitRelief =
+    memory.limitDownDays5d >= 2 ? rng.float(-0.8, 1.8) + Math.max(0, -memory.drawdownFrom10dHigh - 16) * 0.035 : 0;
+  const gapLimit = stock.boardType === "growth" ? 6.8 : stock.boardType === "st" ? 3.8 : 4.6;
+  let gapPct = clamp(
+    randomGap +
+      moodShock * 0.09 +
+      trendContinuation +
+      boardCarry +
+      repeatedLimitRelief +
+      fatigueGap +
+      washoutAttention * (memory.closingBoardState === "limitDown" ? -0.03 : 0.08) -
+      richFatigue * 0.55,
+    -gapLimit,
+    gapLimit
+  );
+  if (Math.abs(gapPct) < 0.18) {
+    gapPct = rng.chance(0.5) ? rng.float(0.18, 0.46) : -rng.float(0.18, 0.46);
+  }
+
+  const auctionPrice = roundMoney(clamp(stock.previousClose * (1 + gapPct / 100), getLowerLimit(stock), getUpperLimit(stock)));
+  stock.price = auctionPrice;
+  stock.open = auctionPrice;
+  stock.high = auctionPrice;
+  stock.low = auctionPrice;
+  stock.microPrice = auctionPrice;
+  stock.momentum = clamp(((auctionPrice - stock.previousClose) / Math.max(0.01, stock.previousClose)) * 1000, -100, 100);
+  stock.microstructure.flowMemory = clamp(gapPct * 4.8, -28, 28);
+  stock.microstructure.shockMemory = clamp(gapPct * 8.5, -45, 45);
+  stock.microstructure.lastPrintSign = gapPct > 0 ? 1 : gapPct < 0 ? -1 : 0;
+  updateValuationFromPrice(stock);
+
+  const openingPrint = stock.chart[0];
+  if (openingPrint?.day === nextDay) {
+    openingPrint.price = auctionPrice;
+  }
+
+  const candle = stock.dailyCandles.find((candidate) => candidate.day === nextDay);
+  if (candle) {
+    candle.open = auctionPrice;
+    candle.high = auctionPrice;
+    candle.low = auctionPrice;
+    candle.close = auctionPrice;
+  }
+
+  return ((auctionPrice - stock.previousClose) / Math.max(0.01, stock.previousClose)) * 100;
 }
 
 function digestKnownFundamentals(game: GameState, stock: Stock): void {

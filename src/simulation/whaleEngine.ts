@@ -106,10 +106,17 @@ function createWhaleOrder(
   const valuation = getValuationSnapshot(stock);
   const memory = getMarketMemory(game, stock);
   const dayChangePct = ((stock.price - stock.previousClose) / stock.previousClose) * 100;
+  const runnerExhaustion = getRunnerExhaustion(stock, memory, valuation.valuationGap);
+  const gapFadeRisk = Math.max(0, -memory.openingGapPct - 0.7) * Math.max(0, memory.openToNowPct - 0.8) * 2.1;
   const staircaseRisk = memory.return5d > 13 || memory.upStreak >= 4 || memory.ma5Deviation > 8;
   const overextended = stock.price > stock.avgHolderCost * 1.08 || valuation.valuationGap > 0.34 || staircaseRisk;
   const veryOverextended = stock.price > stock.avgHolderCost * 1.18 || valuation.valuationGap > 0.66 || memory.return5d > 19 || memory.upStreak >= 5;
-  const profitableExit = positionPnlPct > 0.07 || valuation.valuationGap > 0.5 || (positionPnlPct > 0.025 && staircaseRisk);
+  const profitableExit =
+    positionPnlPct > 0.07 ||
+    valuation.valuationGap > 0.5 ||
+    (positionPnlPct > 0.025 && staircaseRisk) ||
+    (positionPnlPct > 0.01 && runnerExhaustion > 28) ||
+    gapFadeRisk > 18;
   const losingPosition = position > 0 && positionPnlPct < -0.06;
   const stopLossRisk =
     losingPosition &&
@@ -142,6 +149,31 @@ function createWhaleOrder(
   if (campaignOrder || whale.campaign?.stockId === stock.id) return campaignOrder;
   if (whale.campaign && whale.campaign.stockId !== stock.id) return undefined;
 
+  if (
+    position > 0 &&
+    (runnerExhaustion > 30 || gapFadeRisk > 16) &&
+    (profitableExit || positionPnlPct > -0.01) &&
+    (whale.archetype === "quantKnife" ||
+      whale.archetype === "valueWall" ||
+      whale.archetype === "rescueWhale" ||
+      whale.archetype === "sectorRotator" ||
+      whale.archetype === "liquidityVulture" ||
+      whale.archetype === "bagholderWhale")
+  ) {
+    const requestedShares = getWhaleSellShares(
+      stock,
+      position,
+      effectiveDepth,
+      0.078 + Math.min(0.075, (runnerExhaustion + gapFadeRisk) / 900) + whale.aggression / 3_200,
+      dayChangePct,
+      valuation.valuationGap,
+      positionPnlPct
+    );
+    const intention: WhaleIntention =
+      whale.archetype === "quantKnife" ? "attack" : whale.archetype === "sectorRotator" ? "rotate" : "dump";
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention, requestedShares } : undefined;
+  }
+
   if (whale.archetype === "pumpLord" && likesSector && likesCap) {
     if (position > 0 && ((profitableExit && (stock.heat > whale.heatTolerance || stock.boardState === "sealedLimitUp" || overextended)) || stopLossRisk)) {
       const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.11, dayChangePct, valuation.valuationGap, positionPnlPct);
@@ -159,11 +191,13 @@ function createWhaleOrder(
     }
   }
 
-  if (whale.archetype === "quantKnife" && likesSector) {
+  if (whale.archetype === "quantKnife" && (likesSector || runnerExhaustion > 18 || gapFadeRisk > 12 || position > 0)) {
     if (
       position > 0 &&
       ((profitableExit && (fragileBoard || veryOverextended || playerVisibility > 30 || stock.heat > whale.heatTolerance || memory.upStreak >= 4)) ||
-        stopLossRisk)
+        stopLossRisk ||
+        runnerExhaustion > 24 ||
+        gapFadeRisk > 16)
     ) {
       const requestedShares = getWhaleSellShares(
         stock,
@@ -183,7 +217,7 @@ function createWhaleOrder(
     }
   }
 
-  if (whale.archetype === "valueWall" && likesSector && likesCap) {
+  if (whale.archetype === "valueWall" && ((likesSector && likesCap) || (position > 0 && runnerExhaustion > 24))) {
     if (position > 0 && ((profitableExit && (overextended || stock.retail.greed > 68)) || stopLossRisk)) {
       const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.08, dayChangePct, valuation.valuationGap, positionPnlPct);
       return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
@@ -219,19 +253,23 @@ function createWhaleOrder(
     }
   }
 
-  if (whale.archetype === "sectorRotator" && likesCap) {
+  if (whale.archetype === "sectorRotator" && (likesCap || (position > 0 && runnerExhaustion > 24))) {
     if (likesSector && hotSector && stock.heat < whale.heatTolerance && stock.boardState !== "limitDown" && valuation.valuationGap < 0.38 && memory.upStreak < 4) {
       const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.011, 0.075, valuation.valuationGap);
       return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "rotate", requestedCash } : undefined;
     }
 
-    if (position > 0 && ((profitableExit && (!hotSector || stock.heat > whale.heatTolerance || stock.momentum < -10 || memory.upStreak >= 4)) || stopLossRisk)) {
+    if (
+      position > 0 &&
+      ((profitableExit && (!hotSector || stock.heat > whale.heatTolerance || stock.momentum < -10 || memory.upStreak >= 4 || runnerExhaustion > 24)) ||
+        stopLossRisk)
+    ) {
       const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.075, dayChangePct, valuation.valuationGap, positionPnlPct);
       return requestedShares > 0 ? { whale, stock, side: "sell", intention: "rotate", requestedShares } : undefined;
     }
   }
 
-  if (whale.archetype === "liquidityVulture" && likesSector && likesCap) {
+  if (whale.archetype === "liquidityVulture" && ((likesSector && likesCap) || (position > 0 && runnerExhaustion > 26))) {
     if (panicDip && stock.heat < 80 && valuation.valuationGap < 0.18 && (stock.microstructure.flowMemory > -22 || memory.drawdownFrom10dHigh < -14)) {
       const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.016, 0.1, valuation.valuationGap);
       return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "scoop", requestedCash } : undefined;
@@ -241,6 +279,85 @@ function createWhaleOrder(
       const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.1, dayChangePct, valuation.valuationGap, positionPnlPct);
       return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
     }
+  }
+
+  const probeOrder = createOpportunisticProbeOrder(game, stock, whale, effectiveDepth, {
+    likesSector,
+    likesCap,
+    position,
+    positionPnlPct,
+    valuationGap: valuation.valuationGap,
+    dayChangePct,
+    memory,
+    runnerExhaustion,
+    gapFadeRisk
+  });
+  if (probeOrder) return probeOrder;
+
+  return undefined;
+}
+
+function createOpportunisticProbeOrder(
+  game: GameState,
+  stock: Stock,
+  whale: Whale,
+  effectiveDepth: number,
+  context: {
+    likesSector: boolean;
+    likesCap: boolean;
+    position: number;
+    positionPnlPct: number;
+    valuationGap: number;
+    dayChangePct: number;
+    memory: MarketMemorySnapshot;
+    runnerExhaustion: number;
+    gapFadeRisk: number;
+  }
+): WhaleOrder | undefined {
+  const tapeIsInteresting =
+    Math.abs(context.memory.openingGapPct) > 1.15 ||
+    Math.abs(context.memory.openToNowPct) > 2.2 ||
+    Math.abs(context.memory.lastTickMovePct) > 0.36 ||
+    context.memory.return5d > 8 ||
+    context.memory.drawdownFrom10dHigh < -8 ||
+    stock.attention > 68;
+  if (!tapeIsInteresting) return undefined;
+
+  const rng = createRng(`${game.rngSeed}:whale-probe:${game.day}:${game.tick}:${whale.id}:${stock.id}`);
+  const familiarity = context.likesSector || context.likesCap || context.position > 0;
+  const chance = (familiarity ? 0.13 : 0.045) + whale.aggression / 1_400 + Math.min(0.08, Math.abs(context.memory.openingGapPct) / 70);
+  if (!rng.chance(chance)) return undefined;
+
+  if (
+    context.position > 0 &&
+    (context.valuationGap > 0.18 ||
+      context.runnerExhaustion > 16 ||
+      context.gapFadeRisk > 8 ||
+      (context.memory.openToNowPct > 1.8 && context.dayChangePct > 1.2) ||
+      context.positionPnlPct > 0.035)
+  ) {
+    const requestedShares = getWhaleSellShares(
+      stock,
+      context.position,
+      effectiveDepth,
+      0.024 + whale.aggression / 5_000,
+      context.dayChangePct,
+      context.valuationGap,
+      context.positionPnlPct
+    );
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: whale.archetype === "sectorRotator" ? "rotate" : "dump", requestedShares } : undefined;
+  }
+
+  if (
+    whale.cash > 2_000_000 &&
+    familiarity &&
+    stock.boardState !== "sealedLimitUp" &&
+    stock.boardState !== "limitDown" &&
+    context.valuationGap < 0.24 &&
+    (context.memory.openingGapPct < -0.8 || context.memory.drawdownFrom10dHigh < -7 || stock.microstructure.flowMemory > 5)
+  ) {
+    const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.0045, 0.032, context.valuationGap);
+    return requestedCash > 350_000 ? { whale, stock, side: "buy", intention: "scoop", requestedCash } : undefined;
   }
 
   return undefined;
@@ -378,11 +495,19 @@ function isBestWhaleOpportunity(game: GameState, stock: Stock, whale: Whale, pla
 
   const currentScore = scoreWhaleOpportunity(game, stock, whale, playerVisibility);
   if (currentScore <= 0) return false;
+  let bestScore = currentScore;
+  for (const candidate of Object.values(game.stocks)) {
+    if (candidate.id === stock.id || candidate.halted) continue;
+    bestScore = Math.max(bestScore, scoreWhaleOpportunity(game, candidate, whale, 0));
+  }
+  if (currentScore >= bestScore) return true;
 
-  return Object.values(game.stocks).every((candidate) => {
-    if (candidate.id === stock.id || candidate.halted) return true;
-    return currentScore >= scoreWhaleOpportunity(game, candidate, whale, 0);
-  });
+  const nearBest = currentScore >= bestScore * 0.78 && currentScore > 22;
+  const compelling = currentScore > 42;
+  if (!nearBest && !compelling) return false;
+
+  const rng = createRng(`${game.rngSeed}:whale-opportunity:${game.day}:${game.tick}:${whale.id}:${stock.id}`);
+  return rng.chance(compelling ? 0.34 : 0.18);
 }
 
 function scoreWhaleOpportunity(game: GameState, stock: Stock, whale: Whale, playerVisibility: number): number {
@@ -396,7 +521,17 @@ function scoreWhaleOpportunity(game: GameState, stock: Stock, whale: Whale, play
   const memory = getMarketMemory(game, stock);
   const effectiveDepth = calculateEffectiveDepth(stock);
   const hotSector = game.sectors[stock.sector].attention > 52 || game.sectors[stock.sector].momentum > 8;
-  const overextension = Math.max(0, valuation.valuationGap) * 30 + Math.max(0, memory.return5d - 12) * 1.35 + Math.max(0, memory.upStreak - 3) * 4.2;
+  const runnerExhaustion = getRunnerExhaustion(stock, memory, valuation.valuationGap);
+  const gapFadeRisk = Math.max(0, -memory.openingGapPct - 0.7) * Math.max(0, memory.openToNowPct - 0.8) * 2.1;
+  const overextension =
+    Math.max(0, valuation.valuationGap) * 30 +
+    Math.max(0, memory.return5d - 10) * 1.5 +
+    Math.max(0, memory.return10d - 18) * 0.55 +
+    Math.max(0, memory.upStreak - 2) * 4.5 +
+    Math.max(0, memory.greenDays5d - 3) * 4.2 +
+    Math.max(0, memory.openingGapPct - 2) * 2.2 +
+    gapFadeRisk * 0.75 +
+    runnerExhaustion * 0.35;
   const washout =
     Math.max(0, -valuation.valuationGap) * 28 +
     Math.max(0, -memory.return3d - 4) * 1.5 +
@@ -408,31 +543,61 @@ function scoreWhaleOpportunity(game: GameState, stock: Stock, whale: Whale, play
     (memory.lastTickMovePct < -0.35 ? 7 : 0);
   const playerSignal = playerVisibility * 0.55;
   const inventorySignal = positionValue > 0 ? Math.min(36, positionValue / Math.max(1, effectiveDepth) * 14 + Math.max(0, positionPnlPct) * 80) : 0;
-  const preference = (likesSector ? 22 : -24) + (likesCap ? 14 : -16);
+  const preference = (likesSector ? 18 : -8) + (likesCap ? 10 : -6) + (positionValue > 0 ? 8 : 0);
 
   if (whale.archetype === "pumpLord") {
     return preference + playerSignal + inventorySignal + (hotSector ? 14 : 0) + stock.attention * 0.18 - overextension * 0.35 - stock.heat * 0.18;
   }
   if (whale.archetype === "quantKnife") {
-    return (likesSector ? 18 : -18) + playerSignal + inventorySignal + overextension * 0.58 + fragility * 0.85 + Math.max(0, -stock.momentum - 28) * 0.22;
+    return (likesSector ? 14 : -4) + playerSignal + inventorySignal + overextension * 0.72 + runnerExhaustion * 0.5 + fragility * 0.85 + Math.max(0, -stock.momentum - 28) * 0.22;
   }
   if (whale.archetype === "valueWall") {
-    return preference + inventorySignal + washout * 0.9 + overextension * (positionValue > 0 ? 0.65 : -0.28) - (capClass === "large" ? 0 : 16);
+    return preference + inventorySignal + washout * 0.9 + overextension * (positionValue > 0 ? 0.78 : -0.18) - (capClass === "large" ? 0 : positionValue > 0 ? 2 : 12);
   }
   if (whale.archetype === "rescueWhale") {
-    return (capClass === "large" ? 26 : -30) + washout + (game.market.sentiment < 44 ? 12 : 0) - Math.max(0, valuation.valuationGap) * 24;
+    return (
+      (capClass === "large" ? 26 : -30) +
+      washout +
+      inventorySignal * 1.1 +
+      (positionValue > 0 ? (runnerExhaustion + gapFadeRisk) * 0.55 : 0) +
+      (game.market.sentiment < 44 ? 12 : 0) -
+      Math.max(0, valuation.valuationGap) * (positionValue > 0 ? 12 : 24)
+    );
   }
   if (whale.archetype === "bagholderWhale") {
     return preference + playerSignal + inventorySignal * 1.25 + fragility * 0.45 + (positionPnlPct > -0.02 ? stock.retail.greed * 0.15 : 0);
   }
   if (whale.archetype === "sectorRotator") {
-    return (likesCap ? 14 : -16) + (likesSector && hotSector ? 34 : -8) + playerSignal + inventorySignal - overextension * 0.4;
+    return (
+      (likesCap ? 12 : -6) +
+      (likesSector && hotSector ? 28 : -3) +
+      playerSignal +
+      inventorySignal +
+      (positionValue > 0 ? (runnerExhaustion + gapFadeRisk) * 0.62 : -overextension * 0.22)
+    );
   }
   if (whale.archetype === "liquidityVulture") {
-    return preference + washout * 1.15 + playerSignal * 0.45 + inventorySignal + fragility * 0.4;
+    return preference + washout * 1.15 + playerSignal * 0.45 + inventorySignal + fragility * 0.4 + (positionValue > 0 ? (runnerExhaustion + gapFadeRisk) * 0.36 : 0);
   }
 
   return 0;
+}
+
+function getRunnerExhaustion(stock: Stock, memory: MarketMemorySnapshot, valuationGap: number): number {
+  const smoothRunnerBonus = memory.greenDays5d >= 4 && memory.realizedVolatility5d < 3.2 ? 8 : 0;
+  return Math.max(
+    0,
+    Math.max(0, memory.return5d - 9) * 1.28 +
+      Math.max(0, memory.return10d - 16) * 0.58 +
+      Math.max(0, memory.upStreak - 2) * 5 +
+      Math.max(0, memory.greenDays5d - 3) * 5 +
+      Math.max(0, memory.ma5Deviation - 5.5) * 1.4 +
+      Math.max(0, memory.openingGapPct - 2) * 2.4 +
+      Math.max(0, -memory.openingGapPct - 0.7) * Math.max(0, memory.openToNowPct - 0.8) * 1.55 +
+      Math.max(0, valuationGap - 0.3) * 32 +
+      Math.max(0, stock.price / Math.max(0.01, stock.avgHolderCost) - 1.08) * 34 +
+      smoothRunnerBonus
+  );
 }
 
 function setCampaignPhase(game: GameState, whale: Whale, phase: NonNullable<Whale["campaign"]>["phase"]): void {

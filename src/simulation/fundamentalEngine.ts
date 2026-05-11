@@ -32,16 +32,41 @@ export function calculateFundamentalPressure(game: GameState, stock: Stock): Fun
   const marketMood = game.market.sentiment / 100;
   const crashFloorBid =
     (memory.drawdownFrom10dHigh < -28 || memory.return5d < -22 || memory.limitDownDays5d >= 2) && valuation.valuationGap < 0.18
-      ? 0.018 + Math.max(0, -memory.drawdownFrom10dHigh - 20) * 0.001 + memory.limitDownDays5d * 0.007
+      ? 0.026 +
+        Math.max(0, -memory.drawdownFrom10dHigh - 18) * 0.0014 +
+        memory.limitDownDays5d * 0.011 +
+        Math.max(0, -valuation.valuationGap) * 0.018
       : 0;
+  const capitulationSupplyBrake =
+    memory.limitDownDays5d >= 3 && valuation.valuationGap < 0.22
+      ? 0.5
+      : memory.limitDownDays5d === 2 && valuation.valuationGap < 0.12
+        ? 0.68
+        : 1;
+  const stairSupplySignal =
+    Math.max(0, memory.return5d - 11) * 0.00045 +
+    Math.max(0, memory.return10d - 18) * 0.00026 +
+    Math.max(0, memory.upStreak - 2) * 0.001 +
+    Math.max(0, memory.greenDays5d - 3) * 0.0014 +
+    Math.max(0, memory.ma5Deviation - 5.5) * 0.00055;
   const crowdedSupply =
-    memory.return5d > 16 || memory.upStreak >= 4 || memory.ma5Deviation > 9
-      ? (0.0035 + Math.max(0, memory.return5d - 14) * 0.00034 + Math.max(0, memory.upStreak - 3) * 0.0014) *
-        (stock.marketCap > 50_000_000_000 ? 1.35 : 1)
+    memory.return5d > 12 || memory.upStreak >= 3 || memory.greenDays5d >= 4 || memory.ma5Deviation > 7
+      ? (0.0034 + stairSupplySignal + Math.max(0, overvaluation - 0.35) * 0.01) *
+        (stock.marketCap > 50_000_000_000 ? 1.25 : stock.marketCap > 10_000_000_000 ? 1.12 : 1)
       : 0;
   const largeCapOverrunSupply =
-    stock.marketCap > 50_000_000_000 && valuation.valuationGap > 0.55
-      ? 0.012 + Math.max(0, valuation.valuationGap - 0.55) * 0.018 + Math.max(0, memory.return5d - 12) * 0.00042
+    stock.marketCap > 50_000_000_000 && (valuation.valuationGap > 0.3 || memory.return10d > 28 || memory.ma5Deviation > 8)
+      ? 0.01 +
+        Math.max(0, valuation.valuationGap - 0.3) * 0.034 +
+        Math.max(0, memory.return5d - 10) * 0.00062 +
+        Math.max(0, memory.return10d - 24) * 0.00046 +
+        Math.max(0, memory.ma5Deviation - 7) * 0.0007
+      : 0;
+  const richRunnerSupply =
+    valuation.valuationGap > 0.45 && (memory.return5d > 10 || memory.greenDays5d >= 4)
+      ? 0.004 +
+        Math.max(0, valuation.valuationGap - 0.45) * (memory.limitUpDays5d > 0 ? 0.01 : 0.018) +
+        Math.max(0, memory.return5d - 10) * (memory.limitUpDays5d > 0 ? 0.0003 : 0.00055)
       : 0;
 
   const buyFactor =
@@ -51,11 +76,13 @@ export function calculateFundamentalPressure(game: GameState, stock: Stock): Fun
     crashFloorBid;
 
   const sellFactor =
-    overvaluation * (0.018 + qualityPenalty * 0.018 + stock.heat / 8_500) +
-    (mania ? overvaluation * 0.024 + Math.max(0, stock.heat - 60) * 0.00042 : 0) +
-    (fragile && stock.pe > stock.fairPe ? 0.004 + qualityPenalty * 0.009 : 0) +
-    crowdedSupply +
-    largeCapOverrunSupply;
+    (overvaluation * (0.018 + qualityPenalty * 0.018 + stock.heat / 8_500 + (stock.marketCap > 50_000_000_000 ? 0.008 : 0)) +
+      (mania ? overvaluation * 0.024 + Math.max(0, stock.heat - 60) * 0.00042 : 0) +
+      (fragile && stock.pe > stock.fairPe ? 0.004 + qualityPenalty * 0.009 : 0) +
+      crowdedSupply +
+      largeCapOverrunSupply +
+      richRunnerSupply) *
+    capitulationSupplyBrake;
 
   return {
     valuation,

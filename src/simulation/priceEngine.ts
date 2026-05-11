@@ -1,5 +1,5 @@
 import { clamp, GAME_CONFIG } from "../game/config";
-import { updateValuationFromPrice } from "../game/fundamentals";
+import { getValuationSnapshot, updateValuationFromPrice } from "../game/fundamentals";
 import { createRng } from "../game/rng";
 import type { ExecutionFill, GameState, MicrostructureState, Pressure, PressureBreakdown, Stock } from "../game/types";
 import type { AmbientTapeTrace } from "./ambientTape";
@@ -142,6 +142,7 @@ export function applyResidualPriceImpact(
   const priceBefore = stock.price;
   const currentPrice = stock.microPrice ?? stock.price;
   const dayChangePct = ((currentPrice - stock.previousClose) / stock.previousClose) * 100;
+  const openChangePct = ((currentPrice - stock.open) / Math.max(0.01, stock.open)) * 100;
   const limitPct = getLimitRatio(stock) * 100;
   const memory = getMarketMemory(game, stock);
 
@@ -157,13 +158,17 @@ export function applyResidualPriceImpact(
   const directionalTicks =
     (netFlowRatio * getDirectionalTickScale(capClass) + state.flowMemory * 0.034 + state.shockMemory * 0.024) *
     getCapImpactMultiplier(capClass);
-  const extension = clamp(dayChangePct / Math.max(1, limitPct), -1, 1);
-  const reversionTicks = -extension * (0.22 + state.liquidityStress / 92 + Math.abs(state.flowMemory) / 360);
+  const intradayExtension = clamp(openChangePct / Math.max(1, limitPct), -1, 1);
+  const limitExtension = Math.abs(dayChangePct) > limitPct * 0.72 ? clamp(dayChangePct / Math.max(1, limitPct), -1, 1) * 0.28 : 0;
+  const extension = clamp(intradayExtension + limitExtension, -1, 1);
+  const reversionTicks = -extension * (0.09 + state.liquidityStress / 165 + Math.abs(state.flowMemory) / 620);
   const jitterTicks = sampleTriangular(rng) * getJitterScale(game, stock, grossFlowRatio);
   const battleTicks = sampleBattleImpulse(rng, stock, state, netFlowRatio, executionShock);
   const cascadeTicks = sampleCascadeImpulse(rng, stock, state, pressure, netFlowRatio, dayChangePct, limitPct, memory);
   const emotionalTicks = getEmotionalBreakTicks(stock, pressure, netFlowRatio, dayChangePct, limitPct, memory);
-  const printTicks = (directionalTicks + reversionTicks + jitterTicks + battleTicks + cascadeTicks + emotionalTicks) * timeScale;
+  const regimeFrictionTicks = getRegimeFrictionTicks(stock, dayChangePct, limitPct, memory, capClass);
+  const printTicks =
+    (directionalTicks + reversionTicks + jitterTicks + battleTicks + cascadeTicks + emotionalTicks + regimeFrictionTicks) * timeScale;
   const boardAdjustedPrintTicks = enforceQueuePin(stock, pressure, rawExecutionNet, maybeThinPrint(printTicks, rng, state, grossFlowRatio), upperLimit, lowerLimit);
   const nextMicroTicks = currentPrice * 100 + boardAdjustedPrintTicks;
   const unclampedNextPrice = nextMicroTicks / 100;
@@ -202,13 +207,13 @@ function updateTapeState(
 }
 
 function getDirectionalTickScale(capClass: ReturnType<typeof getMarketCapClass>): number {
-  if (capClass === "large") return 2.6;
+  if (capClass === "large") return 1.85;
   if (capClass === "mid") return 4.8;
   return 7.2;
 }
 
 function getCapImpactMultiplier(capClass: ReturnType<typeof getMarketCapClass>): number {
-  if (capClass === "large") return 0.72;
+  if (capClass === "large") return 0.46;
   if (capClass === "mid") return 0.95;
   return 1.18;
 }
@@ -236,6 +241,13 @@ function sampleBattleImpulse(
 
   const stress = state.liquidityStress;
   const retailCounterForce = getRetailCounterForce(stock, flowSign);
+  const capClass = getMarketCapClass(stock);
+  const capCounterBrake = capClass === "large" ? 0.68 : capClass === "mid" ? 0.84 : 1;
+  const trendBrake = clamp(
+    1 - Math.max(0, Math.abs(netFlowRatio) - 0.28) * 0.3 - Math.max(0, Math.abs(state.flowMemory) - 28) / 210,
+    0.36,
+    1
+  );
   const washoutCounterChance =
     flowSign < 0
       ? clamp(stock.retail.dipBuyers / 430 + stock.retail.bagholders / 720 + Math.max(0, -stock.momentum - 16) / 260, 0, 0.34)
@@ -245,7 +257,9 @@ function sampleBattleImpulse(
       ? clamp(stock.costDistribution.deepProfit / 280 + stock.costDistribution.profit / 520 + Math.max(0, stock.momentum - 26) / 310, 0, 0.28)
       : 0;
   const counterChance = clamp(
-    0.035 + stress / 155 + Math.abs(executionShock) * 0.22 + washoutCounterChance + profitTakingChance + retailCounterForce,
+    (0.035 + stress / 155 + Math.abs(executionShock) * 0.22 + washoutCounterChance + profitTakingChance + retailCounterForce) *
+      capCounterBrake *
+      trendBrake,
     0.035,
     0.78
   );
@@ -259,8 +273,8 @@ function sampleBattleImpulse(
   if (rng.chance(counterChance)) {
     const counterScale =
       flowSign < 0
-        ? 0.95 + stock.retail.dipBuyers / 105 + retailCounterForce * 2.4
-        : 0.86 + (stock.costDistribution.deepProfit + stock.costDistribution.profit) / 190 + retailCounterForce * 2;
+        ? (0.95 + stock.retail.dipBuyers / 105 + retailCounterForce * 2.4) * trendBrake
+        : (0.86 + (stock.costDistribution.deepProfit + stock.costDistribution.profit) / 190 + retailCounterForce * 2) * trendBrake;
     impulse -= flowSign * rng.float(0.6, 2.9 + stress / 38) * counterScale;
   }
   if (state.lastPrintSign !== 0 && rng.chance(0.08 + stress / 260)) {
@@ -331,6 +345,8 @@ function sampleCascadeImpulse(
   const absorptionResistance =
     (dayChangePct < -2.5 || memory.drawdownFrom10dHigh < -9) &&
     pressure.buyPressure > stock.currentLiquidity * (memory.limitUpDays5d > 0 ? 0.1 : 0.16) &&
+    pressure.buyPressure > pressure.sellPressure * 0.52 &&
+    (netFlowRatio > -0.36 || state.flowMemory > -8 || memory.lastTickMovePct > 0.12) &&
     (stock.retail.dipBuyers > 34 || stock.financialHealth > 58 || stock.retail.boardFaith > 48 || memory.limitUpDays5d > 0);
   if (
     absorptionResistance &&
@@ -383,6 +399,57 @@ function getEmotionalBreakTicks(
   }
 
   return clamp(ticks, -42, 34);
+}
+
+function getRegimeFrictionTicks(
+  stock: Stock,
+  dayChangePct: number,
+  limitPct: number,
+  memory: MarketMemorySnapshot,
+  capClass: ReturnType<typeof getMarketCapClass>
+): number {
+  const limitProgress = dayChangePct / Math.max(1, limitPct);
+  let ticks = 0;
+
+  if (memory.limitDownDays5d >= 2 && limitProgress > 0.45) {
+    const skepticism = Math.pow(limitProgress - 0.45, 1.15) * (2.4 + memory.limitDownDays5d * 0.85 + memory.boardBreaks5d * 0.35);
+    ticks -= skepticism;
+  }
+
+  if (memory.limitDownDays5d >= 2 && limitProgress < -0.55) {
+    const capitulationFriction = Math.pow(Math.abs(limitProgress) - 0.55, 1.12) * (1.7 + memory.limitDownDays5d * 0.72);
+    ticks += capitulationFriction;
+  }
+
+  if (memory.limitUpDays5d >= 2 && limitProgress < -0.45) {
+    const bargainMemory = Math.pow(Math.abs(limitProgress) - 0.45, 1.12) * (2 + memory.limitUpDays5d * 0.7);
+    ticks += bargainMemory;
+  }
+
+  if (memory.limitUpDays5d >= 2 && limitProgress > 0.55) {
+    const blowoffFriction = Math.pow(limitProgress - 0.55, 1.12) * (1.5 + memory.limitUpDays5d * 0.62);
+    ticks -= blowoffFriction;
+  }
+
+  if (capClass === "large" && Math.abs(dayChangePct) > 3.4) {
+    const sign = dayChangePct > 0 ? 1 : -1;
+    ticks -= sign * Math.pow(Math.abs(dayChangePct) - 3.4, 1.08) * 0.22;
+  }
+
+  if (stock.marketCap > 150_000_000_000 && Math.abs(dayChangePct) > 2.4) {
+    const sign = dayChangePct > 0 ? 1 : -1;
+    ticks -= sign * Math.pow(Math.abs(dayChangePct) - 2.4, 1.05) * 0.18;
+  }
+
+  const valuation = getValuationSnapshot(stock);
+  const richThreshold = capClass === "large" ? 0 : capClass === "mid" ? 0.14 : 0.22;
+  const richGravity = Math.max(0, valuation.valuationGap - richThreshold);
+  if (richGravity > 0 && dayChangePct > -1.2) {
+    const capSensitivity = capClass === "large" ? 2.35 : capClass === "mid" ? 0.92 : 0.58;
+    ticks -= richGravity * capSensitivity * (0.9 + Math.max(0, dayChangePct) / Math.max(2.4, limitPct * 0.28));
+  }
+
+  return clamp(ticks, -12, 12);
 }
 
 function getRetailCounterForce(stock: Stock, flowSign: -1 | 0 | 1): number {

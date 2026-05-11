@@ -32,7 +32,9 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
         DRAGON_SOFT: 900_000,
         GOLDEN_ROOF: 2_200_000,
         SKY_SHIELD: 750_000,
-        RED_RIVER_LITHIUM: 1_100_000
+        RED_RIVER_LITHIUM: 1_100_000,
+        CLOUDHARBOR_AI: 520_000,
+        NORTHSTAR_ROBOTICS: 460_000
       },
       avgCostByStock: {},
       realizedPnl: 0,
@@ -56,7 +58,10 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       positions: {
         PEARL_DAILY: 2_000_000,
         HARBOR_BANK: 8_000_000,
-        EAST_GRID_ENERGY: 3_500_000
+        EAST_GRID_ENERGY: 3_500_000,
+        RED_RIVER_LITHIUM: 780_000,
+        ORCHID_SNACKS: 1_100_000,
+        WESTERN_CLOUD_BANK: 4_000_000
       },
       avgCostByStock: {},
       realizedPnl: 0,
@@ -77,7 +82,10 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       name: "Blue Anchor Holdings",
       archetype: "rescueWhale",
       cash: 900_000_000,
-      positions: {},
+      positions: {
+        RED_RIVER_LITHIUM: 520_000,
+        WESTERN_CLOUD_BANK: 3_200_000
+      },
       avgCostByStock: {},
       realizedPnl: 0,
       unrealizedPnl: 0,
@@ -99,7 +107,9 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       cash: 120_000_000,
       positions: {
         GOLDEN_ROOF: 12_000_000,
-        NEW_HORIZON_BIO: 1_400_000
+        NEW_HORIZON_BIO: 1_400_000,
+        RIVERSTONE_CEMENT: 2_800_000,
+        MIRROR_LAKE_MED: 520_000
       },
       avgCostByStock: {},
       realizedPnl: 0,
@@ -122,7 +132,9 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       cash: 420_000_000,
       positions: {
         RED_RIVER_LITHIUM: 900_000,
-        SKY_SHIELD: 550_000
+        SKY_SHIELD: 550_000,
+        COPPER_CROWN_MINING: 1_100_000,
+        SILVER_PINES_SOLAR: 1_300_000
       },
       avgCostByStock: {},
       realizedPnl: 0,
@@ -145,7 +157,10 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       cash: 260_000_000,
       positions: {
         GOLDEN_ROOF: 1_200_000,
-        NEW_HORIZON_BIO: 450_000
+        NEW_HORIZON_BIO: 450_000,
+        RED_RIVER_LITHIUM: 360_000,
+        RIVERSTONE_CEMENT: 1_500_000,
+        MIRROR_LAKE_MED: 260_000
       },
       avgCostByStock: {},
       realizedPnl: 0,
@@ -168,7 +183,10 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       cash: 240_000_000,
       positions: {
         RED_RIVER_LITHIUM: 700_000,
-        DRAGON_SOFT: 420_000
+        DRAGON_SOFT: 420_000,
+        PEARL_DAILY: 260_000,
+        CLOUDHARBOR_AI: 360_000,
+        COPPER_CROWN_MINING: 620_000
       },
       avgCostByStock: {},
       realizedPnl: 0,
@@ -179,7 +197,7 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       riskTolerance: 66,
       heatTolerance: 68,
       preferredCaps: ["small", "mid"],
-      preferredSectors: ["resources", "tech", "defense"],
+      preferredSectors: ["resources", "tech", "defense", "energy"],
       intention: "idle",
       nextActionTick: 1,
       strategyNote: "Fades overextended multi-day runs and joins fast stop-loss cascades."
@@ -189,7 +207,12 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       name: "Jade Mountain Themes",
       archetype: "pumpLord",
       cash: 320_000_000,
-      positions: {},
+      positions: {
+        RED_RIVER_LITHIUM: 620_000,
+        SKY_SHIELD: 360_000,
+        CLOUDHARBOR_AI: 280_000,
+        NORTHSTAR_ROBOTICS: 300_000
+      },
       avgCostByStock: {},
       realizedPnl: 0,
       unrealizedPnl: 0,
@@ -199,7 +222,7 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       riskTolerance: 70,
       heatTolerance: 54,
       preferredCaps: ["small", "mid"],
-      preferredSectors: ["resources", "biotech", "defense"],
+      preferredSectors: ["resources", "biotech", "defense", "tech"],
       intention: "idle",
       nextActionTick: 2,
       strategyNote: "Runs short theme campaigns, then returns after shakeouts instead of vanishing."
@@ -212,7 +235,11 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       positions: {
         EAST_GRID_ENERGY: 2_600_000,
         HARBOR_BANK: 5_500_000,
-        PEARL_DAILY: 900_000
+        PEARL_DAILY: 900_000,
+        RED_RIVER_LITHIUM: 640_000,
+        ORCHID_SNACKS: 700_000,
+        SILVER_PINES_SOLAR: 900_000,
+        COPPER_CROWN_MINING: 550_000
       },
       avgCostByStock: {},
       realizedPnl: 0,
@@ -233,7 +260,12 @@ export function createWhales(stocks: Record<StockId, Stock>): Whale[] {
       name: "Harbor Stabilization Desk",
       archetype: "rescueWhale",
       cash: 760_000_000,
-      positions: {},
+      positions: {
+        RED_RIVER_LITHIUM: 560_000,
+        SKY_SHIELD: 300_000,
+        WESTERN_CLOUD_BANK: 2_400_000,
+        ORCHID_SNACKS: 520_000
+      },
       avgCostByStock: {},
       realizedPnl: 0,
       unrealizedPnl: 0,

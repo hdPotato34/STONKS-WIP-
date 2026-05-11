@@ -7,7 +7,7 @@ export const GAME_CONFIG = {
   startingCash: 1_000_000_000,
   targetNetWorth: 2_500_000_000,
 
-  stockCount: 8,
+  stockCount: 16,
 
   mainBoardLimit: 0.1,
   growthBoardLimit: 0.2,
