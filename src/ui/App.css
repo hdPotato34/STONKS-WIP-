@@ -64,9 +64,9 @@ button:disabled {
 
 .topbar {
   display: grid;
-  grid-template-columns: 250px 330px minmax(270px, 1fr) auto;
+  grid-template-columns: 228px minmax(140px, 190px) minmax(260px, 310px) minmax(360px, 1fr) auto;
   align-items: stretch;
-  gap: 12px;
+  gap: 10px;
   padding: 0 14px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -102,6 +102,45 @@ button:disabled {
   font-size: 12px;
 }
 
+.whale-index {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.whale-index-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.whale-index-value {
+  margin-top: 1px;
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 820;
+}
+
+.whale-index-change {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.whale-index-change span {
+  font-weight: 820;
+}
+
+.whale-index .tone-flat {
+  color: var(--text) !important;
+}
+
 .main-nav {
   display: flex;
   align-items: stretch;
@@ -110,8 +149,8 @@ button:disabled {
 
 .main-nav button {
   position: relative;
-  min-width: 104px;
-  padding: 0 16px;
+  min-width: 86px;
+  padding: 0 12px;
   color: var(--muted);
   background: transparent;
   font-weight: 620;
@@ -134,11 +173,12 @@ button:disabled {
 
 .clock-block {
   display: grid;
-  grid-template-columns: auto minmax(120px, 260px) auto;
+  grid-template-columns: minmax(72px, auto) minmax(150px, 1fr) minmax(86px, auto);
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  min-width: 0;
+  justify-content: stretch;
+  gap: 10px;
+  min-width: 340px;
+  padding: 0 4px;
 }
 
 .clock-item {
@@ -205,7 +245,7 @@ button:disabled {
   display: flex;
   align-items: center;
   min-width: 150px;
-  max-width: 280px;
+  max-width: none;
 }
 
 .progress-with-skip .progress {
@@ -243,7 +283,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
+  min-width: max-content;
 }
 
 .icon-button {
@@ -261,6 +302,50 @@ button:disabled {
   color: #ffffff;
   border-color: var(--ink);
   background: var(--ink);
+}
+
+.autosave-status {
+  display: grid;
+  grid-template-columns: minmax(70px, 100px) auto auto;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 5px 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.autosave-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autosave-status.loaded {
+  color: var(--ink);
+}
+
+.autosave-status.saved {
+  color: var(--down);
+}
+
+.autosave-status.error {
+  color: var(--heat);
+}
+
+.autosave-status button {
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 720;
 }
 
 .speed-control {
@@ -369,6 +454,26 @@ button:disabled {
   gap: 7px;
 }
 
+.market-head {
+  gap: 10px;
+}
+
+.simple-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.simple-toggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--ink);
+}
+
 .market-panel {
   display: grid;
   grid-column: 1;
@@ -379,6 +484,144 @@ button:disabled {
 .table-scroll {
   min-height: 0;
   overflow: auto;
+}
+
+.simple-market-list {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+}
+
+.simple-market-row {
+  display: grid;
+  grid-template-columns: minmax(132px, 1fr) minmax(132px, 1.1fr) minmax(82px, 0.58fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 76px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf0ec;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+}
+
+.simple-market-row:hover,
+.simple-market-row.selected {
+  background: #edf4ff;
+}
+
+.simple-market-info {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.simple-market-info strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simple-market-info span,
+.simple-market-info em {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simple-market-price {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.simple-market-price strong {
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 820;
+}
+
+.simple-market-price span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  height: 26px;
+  border-radius: 5px;
+  color: #ffffff !important;
+  font-size: 13px;
+  font-weight: 820;
+}
+
+.simple-market-price.up strong {
+  color: var(--up);
+}
+
+.simple-market-price.down strong {
+  color: var(--down);
+}
+
+.simple-market-price.flat strong {
+  color: var(--text);
+}
+
+.simple-market-price.up span {
+  background: var(--up);
+}
+
+.simple-market-price.down span {
+  background: var(--down);
+}
+
+.simple-market-price.flat span {
+  color: var(--text) !important;
+  border: 1px solid #dde4dd;
+  background: #f6f8f5;
+}
+
+.mini-sparkline {
+  width: 100%;
+  height: 52px;
+  overflow: visible;
+}
+
+.mini-baseline {
+  stroke: #d3d9d3;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.mini-line {
+  fill: none;
+  stroke-width: 2;
+}
+
+.mini-area {
+  stroke: none;
+  opacity: 0.2;
+}
+
+.mini-sparkline.up .mini-line {
+  stroke: var(--up);
+}
+
+.mini-sparkline.up .mini-area {
+  fill: var(--up);
+}
+
+.mini-sparkline.down .mini-line {
+  stroke: var(--down);
+}
+
+.mini-sparkline.down .mini-area {
+  fill: var(--down);
 }
 
 .market-table,
@@ -833,6 +1076,10 @@ button:disabled {
 
 .chart-hover-layer text:last-child {
   fill: #7b8580;
+}
+
+.kline-hover-layer text {
+  font-size: 8.5px;
 }
 
 .trade-mark-toggle {
@@ -1408,6 +1655,30 @@ button:disabled {
 
 .tone-heat {
   color: var(--heat) !important;
+}
+
+@media (max-width: 1380px) {
+  .topbar {
+    grid-template-columns: 210px minmax(130px, 170px) minmax(250px, 280px) minmax(340px, 1fr) auto;
+    gap: 8px;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .main-nav button {
+    min-width: 78px;
+    padding: 0 10px;
+  }
+
+  .autosave-status {
+    grid-template-columns: auto auto;
+  }
+
+  .autosave-status span {
+    display: none;
+  }
 }
 
 @media (max-width: 1180px) {
