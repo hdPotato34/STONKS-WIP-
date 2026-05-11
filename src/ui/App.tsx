@@ -548,8 +548,6 @@ function MarketOverview({
                 <MiniIntradaySparkline
                   chart={stock.chart}
                   previousClose={stock.previousClose}
-                  lowerLimit={getLowerLimit(stock)}
-                  upperLimit={getUpperLimit(stock)}
                   currentDay={game.day}
                 />
                 <div className={`simple-market-price ${tone}`}>
@@ -969,22 +967,23 @@ function QuickPicker({
 function MiniIntradaySparkline({
   chart,
   previousClose,
-  lowerLimit,
-  upperLimit,
   currentDay
 }: {
   chart: TickPrice[];
   previousClose: number;
-  lowerLimit: number;
-  upperLimit: number;
   currentDay: number;
 }) {
   const points = chart.filter((point) => point.day === currentDay);
   const width = 170;
   const height = 48;
   const values = points.length > 0 ? points : [{ day: currentDay, tick: 0, price: previousClose, boardState: "loose" as BoardState }];
-  const low = Math.min(lowerLimit, previousClose);
-  const high = Math.max(upperLimit, previousClose, low + 0.01);
+  const prices = values.map((point) => point.price);
+  const min = Math.min(...prices, previousClose);
+  const max = Math.max(...prices, previousClose);
+  const span = Math.max(0.01, max - min);
+  const pad = span * 0.16;
+  const low = min - pad;
+  const high = max + pad;
   const lastTickIndex = Math.max(1, GAME_CONFIG.ticksPerDay - 1);
   const xForTick = (tick: number) => (Math.min(lastTickIndex, Math.max(0, tick)) / lastTickIndex) * width;
   const yFor = (price: number) => height - ((price - low) / (high - low)) * height;
