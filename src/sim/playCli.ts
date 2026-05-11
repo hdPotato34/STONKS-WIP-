@@ -149,7 +149,7 @@ function handleCommand(raw: string): boolean {
 }
 
 function runOneTick(actions: PlayerAction[]): void {
-  const result = updateTick(game, actions);
+  const result = updateTick(game, actions, { detail: "full" });
   recentResults.push(result);
   if (recentResults.length > 80) recentResults.shift();
 

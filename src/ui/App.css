@@ -155,16 +155,87 @@ button:disabled {
 }
 
 .progress {
-  height: 8px;
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  flex: 1;
+  height: 17px;
   min-width: 120px;
-  overflow: hidden;
   border-radius: 999px;
+}
+
+.run-progress-track,
+.day-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: inherit;
   background: #dfe4df;
 }
 
-.progress div {
+.run-progress-fill {
   height: 100%;
   border-radius: inherit;
+  background: var(--ink);
+}
+
+.day-progress-track {
+  position: relative;
+  background: #eadbc8;
+}
+
+.day-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #a86b31;
+}
+
+.midday-marker {
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 4px;
+  height: 11px;
+  border-radius: 999px;
+  background: #6f451d;
+  box-shadow: 0 0 0 2px #fffaf1;
+}
+
+.progress-with-skip {
+  display: flex;
+  align-items: center;
+  min-width: 150px;
+  max-width: 280px;
+}
+
+.progress-with-skip .progress {
+  min-width: 0;
+}
+
+.fast-forward-button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: -1px;
+  border: 1px solid #dfe4df;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgba(25, 32, 31, 0.04);
+}
+
+.fast-forward-button:hover,
+.fast-forward-button:focus-visible {
+  color: var(--ink);
+  border-color: #bfd0f7;
+  background: var(--ink-soft);
+  outline: 0;
+}
+
+.fast-forward-button.active {
+  color: #ffffff;
+  border-color: var(--ink);
   background: var(--ink);
 }
 
@@ -643,11 +714,17 @@ button:disabled {
   font-weight: 720;
 }
 
+.intraday-frame {
+  position: relative;
+  min-height: 0;
+}
+
 .chart-svg {
   width: 100%;
   height: 100%;
   min-height: 0;
   overflow: visible;
+  cursor: crosshair;
 }
 
 .grid-lines line {
@@ -709,6 +786,92 @@ button:disabled {
   font-weight: 760;
 }
 
+.trade-mark circle {
+  stroke: #ffffff;
+  stroke-width: 1.5;
+}
+
+.trade-mark text {
+  font-size: 10px;
+  font-weight: 820;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 2px;
+}
+
+.trade-mark.buy {
+  fill: var(--up);
+}
+
+.trade-mark.sell {
+  fill: var(--down);
+}
+
+.chart-hover-layer line {
+  stroke: #7a8580;
+  stroke-width: 0.8;
+  stroke-dasharray: 3 3;
+  opacity: 0.72;
+}
+
+.chart-hover-layer circle {
+  fill: #ffffff;
+  stroke: var(--ink);
+  stroke-width: 1.7;
+}
+
+.chart-hover-layer rect {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: var(--line);
+}
+
+.chart-hover-layer text {
+  fill: var(--text);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.chart-hover-layer text:last-child {
+  fill: #7b8580;
+}
+
+.trade-mark-toggle {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.trade-mark-toggle span {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--up);
+  border-radius: 999px;
+}
+
+.trade-mark-toggle:hover,
+.trade-mark-toggle:focus-visible,
+.trade-mark-toggle.active {
+  color: var(--ink);
+  border-color: #bfd0f7;
+  background: var(--ink-soft);
+  outline: 0;
+}
+
+.trade-mark-toggle.active span {
+  background: var(--up);
+}
+
 .candle line {
   stroke-width: 1.5;
 }
@@ -763,7 +926,7 @@ button:disabled {
   grid-row: 1 / span 2;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 304px 248px minmax(0, 1fr);
+  grid-template-rows: 236px 320px minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -776,18 +939,19 @@ button:disabled {
   display: grid;
   align-content: start;
   min-height: 0;
-  overflow: auto;
-  padding: 8px 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 10px;
 }
 
 .book-row {
   display: grid;
   grid-template-columns: 45px 1fr 1.25fr;
   align-items: center;
-  min-height: 22px;
-  padding: 2px 4px;
+  min-height: 18px;
+  padding: 1px 4px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .book-head {
@@ -813,8 +977,8 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 5px 0;
-  padding: 7px 4px;
+  margin: 3px 0;
+  padding: 5px 4px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   color: var(--muted);
@@ -834,7 +998,7 @@ button:disabled {
   align-content: start;
   min-height: 0;
   gap: 10px;
-  overflow: auto;
+  overflow: visible;
   padding: 12px;
 }
 
@@ -881,7 +1045,7 @@ button:disabled {
 
 .field-row {
   display: grid;
-  grid-template-columns: 1fr 130px;
+  grid-template-columns: 1fr 34px 130px;
   align-items: center;
   gap: 10px;
 }
@@ -900,6 +1064,93 @@ button:disabled {
   text-align: right;
   color: var(--text);
   background: var(--surface-soft);
+}
+
+.quick-picker {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 32px;
+}
+
+.quick-picker::after {
+  position: absolute;
+  top: 100%;
+  right: -4px;
+  z-index: 19;
+  display: none;
+  width: 150px;
+  height: 10px;
+  content: "";
+}
+
+.quick-picker:hover::after,
+.quick-picker:focus-within::after {
+  display: block;
+}
+
+.quick-trigger {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.quick-picker:hover .quick-trigger,
+.quick-picker:focus-within .quick-trigger {
+  color: var(--ink);
+  border-color: #bfd0f7;
+  background: var(--ink-soft);
+}
+
+.quick-popover {
+  position: absolute;
+  right: 2px;
+  top: calc(100% + 2px);
+  z-index: 20;
+  display: grid;
+  min-width: 122px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 14px 28px rgba(25, 32, 31, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.quick-picker:hover .quick-popover,
+.quick-picker:focus-within .quick-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.quick-popover button {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 5px;
+  color: var(--text);
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.quick-popover button:hover,
+.quick-popover button:focus-visible {
+  color: var(--ink);
+  background: var(--ink-soft);
+  outline: 0;
 }
 
 .ticket-summary {
@@ -1181,6 +1432,10 @@ button:disabled {
     justify-content: stretch;
   }
 
+  .progress-with-skip {
+    max-width: none;
+  }
+
   .run-controls {
     justify-content: flex-start;
   }
@@ -1245,6 +1500,14 @@ button:disabled {
   }
 
   .field-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 34px minmax(0, 1fr);
+  }
+
+  .field-row span {
+    grid-column: 1 / -1;
+  }
+
+  .field-row input {
+    min-width: 0;
   }
 }

@@ -8,7 +8,15 @@ import { createMarketDepth, executeBuyFromDepth, executeSellIntoDepth } from "./
 import { getMarketMemory } from "./marketMemory";
 import { createPressure } from "./priceEngine";
 import { advanceToIntraday, findStockTrace } from "./scenarioTools";
-import { updateTick } from "./tick";
+import { updateTick as updateTickBase } from "./tick";
+
+function updateTick(game: Parameters<typeof updateTickBase>[0], playerActions: Parameters<typeof updateTickBase>[1] = []) {
+  return updateTickBase(game, playerActions, { detail: "full" });
+}
+
+function updateTickSummary(game: Parameters<typeof updateTickBase>[0], playerActions: Parameters<typeof updateTickBase>[1] = []) {
+  return updateTickBase(game, playerActions);
+}
 import { createWhaleOrders } from "./whaleEngine";
 
 describe("headless market kernel", () => {
@@ -708,6 +716,45 @@ describe("headless market kernel", () => {
     expect(a.stocks.SKY_SHIELD.price).toBe(b.stocks.SKY_SHIELD.price);
     expect(a.player.netWorth).toBe(b.player.netWorth);
     expect(a.eventLog.map((event) => event.message)).toEqual(b.eventLog.map((event) => event.message));
+  });
+
+  it("returns compact tick summaries by default while retaining full detail on request", () => {
+    const compact = createInitialGame("compact-tick-result-test");
+    const detailed = createInitialGame("compact-tick-result-test");
+    advanceToIntraday(compact);
+    advanceToIntraday(detailed);
+
+    const compactResult = updateTickSummary(compact, [{ type: "marketBuy", stockId: "DRAGON_SOFT", amountCash: 20_000_000 }]);
+    const detailedResult = updateTick(detailed, [{ type: "marketBuy", stockId: "DRAGON_SOFT", amountCash: 20_000_000 }]);
+    const compactTrace = findStockTrace(compactResult, "DRAGON_SOFT");
+    const detailedTrace = findStockTrace(detailedResult, "DRAGON_SOFT");
+
+    expect(compactResult.playerFills.length).toBeGreaterThan(0);
+    expect(compactTrace.playerFills).toHaveLength(0);
+    expect(compactTrace.whaleTrades).toHaveLength(0);
+    expect(compactTrace.heatCauses).toHaveLength(0);
+    expect(compactResult.detail).toBeUndefined();
+
+    expect(detailedTrace.playerFills.length).toBeGreaterThan(0);
+    expect(detailedResult.detail?.stocks.length).toBe(detailedResult.stocks.length);
+  });
+
+  it("caps the retained game event log", () => {
+    const game = createInitialGame("event-log-cap-test");
+
+    for (let index = 0; index < 2_050; index += 1) {
+      game.eventLog.push({
+        day: 1,
+        tick: index,
+        type: "synthetic",
+        message: `Synthetic event ${index}`
+      });
+    }
+
+    updateTickSummary(game);
+
+    expect(game.eventLog).toHaveLength(2_000);
+    expect(game.eventLog[0]?.message).toBe("Synthetic event 51");
   });
 });
 
