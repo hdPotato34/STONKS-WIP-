@@ -1702,10 +1702,21 @@ function readAutosave(): AutosaveFile | undefined {
 
     const parsed = JSON.parse(raw) as Partial<AutosaveFile>;
     if (parsed.version !== 1 || !parsed.game || !parsed.ui) return undefined;
+    if (!isAutosaveCompatible(parsed as AutosaveFile)) {
+      clearAutosave();
+      return undefined;
+    }
     return parsed as AutosaveFile;
   } catch {
     return undefined;
   }
+}
+
+function isAutosaveCompatible(save: AutosaveFile): boolean {
+  if (!save.game?.stocks || !save.game.stocks.DRAGON_SOFT) return false;
+  if (!stockIds.every((stockId) => Boolean(save.game.stocks[stockId]))) return false;
+  if (save.ui.selectedStockId && !save.game.stocks[save.ui.selectedStockId]) return false;
+  return true;
 }
 
 function writeAutosave(args: {
