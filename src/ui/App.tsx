@@ -37,6 +37,11 @@ type FastForwardState = {
   startDay: number;
   restoreRunning: boolean;
 };
+type WhaleIndexSnapshot = {
+  value: number;
+  change: number;
+  changePct: number;
+};
 type WhaleFeedRow = {
   key: string;
   day: number;
@@ -62,6 +67,7 @@ const stockIds: StockId[] = [
 
 export function App() {
   const gameRef = useRef<GameState>(createInitialUiGame("web-mvp"));
+  const indexBaseValueRef = useRef(calculateWeightedMarketValue(gameRef.current));
   const [, setGameVersion] = useState(0);
   const game = gameRef.current;
   const [selectedStockId, setSelectedStockId] = useState<StockId>("DRAGON_SOFT");
@@ -74,6 +80,7 @@ export function App() {
   const [kLineAxisMode, setKLineAxisMode] = useState<KLineAxisMode>("auto");
   const [tradeSide, setTradeSide] = useState<TradeSide>("buy");
   const [showTradeMarks, setShowTradeMarks] = useState(false);
+  const [simpleMarketMode, setSimpleMarketMode] = useState(false);
   const [quantity, setQuantity] = useState("10000");
   const [limitPrice, setLimitPrice] = useState(() => gameRef.current.stocks.DRAGON_SOFT.price.toFixed(2));
   const [navPage, setNavPage] = useState<NavPage>("market");
@@ -82,6 +89,7 @@ export function App() {
   const fastForwardRef = useRef<FastForwardState>(fastForward);
 
   const selectedStock = game.stocks[selectedStockId];
+  const whaleIndex = calculateWhaleIndex(game, indexBaseValueRef.current);
   const selectedTrace = useMemo(() => {
     return recentResults.map((result) => result.stocks.find((stock) => stock.stockId === selectedStockId)).find(Boolean);
   }, [recentResults, selectedStockId]);
@@ -135,6 +143,7 @@ export function App() {
   const resetRun = () => {
     const fresh = createInitialUiGame(`web-mvp-${Date.now()}`);
     gameRef.current = fresh;
+    indexBaseValueRef.current = calculateWeightedMarketValue(fresh);
     setGameVersion((version) => version + 1);
     setRecentResults([]);
     pendingActionsRef.current = [];
@@ -255,6 +264,8 @@ export function App() {
           </div>
         </div>
 
+        <WhaleIndexBar index={whaleIndex} />
+
         <nav className="main-nav" aria-label="Main views">
           {(["market", "fundamentals", "portfolio"] as NavPage[]).map((page) => (
             <button className={navPage === page ? "active" : ""} key={page} onClick={() => setNavPage(page)}>
@@ -322,7 +333,13 @@ export function App() {
       </section>
 
       <main className="main-grid">
-        <MarketOverview game={game} selectedStockId={selectedStockId} onSelect={setSelectedStockId} />
+        <MarketOverview
+          game={game}
+          selectedStockId={selectedStockId}
+          simpleMode={simpleMarketMode}
+          onSimpleModeChange={setSimpleMarketMode}
+          onSelect={setSelectedStockId}
+        />
         <StockWorkspace
           game={game}
           stock={selectedStock}
@@ -361,64 +378,105 @@ export function App() {
 function MarketOverview({
   game,
   selectedStockId,
+  simpleMode,
+  onSimpleModeChange,
   onSelect
 }: {
   game: GameState;
   selectedStockId: StockId;
+  simpleMode: boolean;
+  onSimpleModeChange: (value: boolean) => void;
   onSelect: (stockId: StockId) => void;
 }) {
   return (
     <section className="panel market-panel">
-      <PanelTitle title="Market Overview (A-Share)" icon={<BarChart3 size={15} />} />
-      <div className="table-scroll">
-        <table className="market-table">
-          <thead>
-            <tr>
-              <th>Stock</th>
-              <th>Sector</th>
-              <th>Board</th>
-              <th>Price</th>
-              <th>Chg</th>
-              <th>State</th>
-              <th>Attn</th>
-              <th>Sent</th>
-              <th>Heat</th>
-              <th>Turn</th>
-              <th>Vol</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stockIds.map((stockId) => {
-              const stock = game.stocks[stockId];
-              const change = dailyChangePct(stock);
-              return (
-                <tr
-                  key={stock.id}
-                  className={stock.id === selectedStockId ? "selected" : ""}
-                  onClick={() => onSelect(stock.id)}
-                >
-                  <td>
-                    <strong>{stock.id}</strong>
-                    <span>{stock.name}</span>
-                  </td>
-                  <td>{sectorLabel(stock.sector)}</td>
-                  <td>{boardShortLabel(stock.boardType)}</td>
-                  <td>{stock.price.toFixed(2)}</td>
-                  <td className={change >= 0 ? "tone-up" : "tone-down"}>{signedPct(change)}</td>
-                  <td>
-                    <span className={`state-chip ${stateClass(stock.boardState)}`}>{boardStateLabel(stock.boardState)}</span>
-                  </td>
-                  <td>{stock.attention.toFixed(0)}</td>
-                  <td>{stock.sentiment.toFixed(0)}</td>
-                  <td className={stock.heat > 65 ? "tone-heat" : ""}>{stock.heat.toFixed(0)}</td>
-                  <td>{compactMoney(stock.turnover)}</td>
-                  <td>{shortShares(stock.volume)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="panel-title market-head">
+        <div>
+          <BarChart3 size={15} />
+          <span>Market Overview (A-Share)</span>
+        </div>
+        <label className="simple-toggle">
+          <input type="checkbox" checked={simpleMode} onChange={(event) => onSimpleModeChange(event.target.checked)} />
+          <span>Simple</span>
+        </label>
       </div>
+      {simpleMode ? (
+        <div className="simple-market-list">
+          {stockIds.map((stockId) => {
+            const stock = game.stocks[stockId];
+            const change = dailyChangePct(stock);
+            return (
+              <button
+                key={stock.id}
+                className={stock.id === selectedStockId ? "simple-market-row selected" : "simple-market-row"}
+                onClick={() => onSelect(stock.id)}
+                type="button"
+              >
+                <div className="simple-market-info">
+                  <strong>{stock.id}</strong>
+                  <span>{stock.name}</span>
+                  <em>{titleCase(stock.sector)}</em>
+                </div>
+                <MiniIntradaySparkline chart={stock.chart} previousClose={stock.previousClose} currentDay={game.day} />
+                <div className="simple-market-price">
+                  <strong className={change >= 0 ? "tone-up" : "tone-down"}>{stock.price.toFixed(2)}</strong>
+                  <span className={change >= 0 ? "tone-up" : "tone-down"}>{signedPct(change)}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="table-scroll">
+          <table className="market-table">
+            <thead>
+              <tr>
+                <th>Stock</th>
+                <th>Sector</th>
+                <th>Board</th>
+                <th>Price</th>
+                <th>Chg</th>
+                <th>State</th>
+                <th>Attn</th>
+                <th>Sent</th>
+                <th>Heat</th>
+                <th>Turn</th>
+                <th>Vol</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockIds.map((stockId) => {
+                const stock = game.stocks[stockId];
+                const change = dailyChangePct(stock);
+                return (
+                  <tr
+                    key={stock.id}
+                    className={stock.id === selectedStockId ? "selected" : ""}
+                    onClick={() => onSelect(stock.id)}
+                  >
+                    <td>
+                      <strong>{stock.id}</strong>
+                      <span>{stock.name}</span>
+                    </td>
+                    <td>{sectorLabel(stock.sector)}</td>
+                    <td>{boardShortLabel(stock.boardType)}</td>
+                    <td>{stock.price.toFixed(2)}</td>
+                    <td className={change >= 0 ? "tone-up" : "tone-down"}>{signedPct(change)}</td>
+                    <td>
+                      <span className={`state-chip ${stateClass(stock.boardState)}`}>{boardStateLabel(stock.boardState)}</span>
+                    </td>
+                    <td>{stock.attention.toFixed(0)}</td>
+                    <td>{stock.sentiment.toFixed(0)}</td>
+                    <td className={stock.heat > 65 ? "tone-heat" : ""}>{stock.heat.toFixed(0)}</td>
+                    <td>{compactMoney(stock.turnover)}</td>
+                    <td>{shortShares(stock.volume)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="panel-foot">
         <span>Turnover in CNY</span>
         <span>Volume in shares</span>
@@ -708,6 +766,19 @@ function OrderTicket({
   );
 }
 
+function WhaleIndexBar({ index }: { index: WhaleIndexSnapshot }) {
+  return (
+    <div className="whale-index">
+      <div className="whale-index-label">Whale Index</div>
+      <div className={index.change >= 0 ? "whale-index-value tone-up" : "whale-index-value tone-down"}>{index.value.toFixed(2)}</div>
+      <div className={index.change >= 0 ? "whale-index-change tone-up" : "whale-index-change tone-down"}>
+        <strong>{index.change >= 0 ? "+" : ""}{index.change.toFixed(2)}</strong>
+        <span>{index.changePct >= 0 ? "+" : ""}{index.changePct.toFixed(2)}%</span>
+      </div>
+    </div>
+  );
+}
+
 function QuickPicker({
   label,
   trigger,
@@ -730,6 +801,43 @@ function QuickPicker({
         ))}
       </div>
     </div>
+  );
+}
+
+function MiniIntradaySparkline({
+  chart,
+  previousClose,
+  currentDay
+}: {
+  chart: TickPrice[];
+  previousClose: number;
+  currentDay: number;
+}) {
+  const points = chart.filter((point) => point.day === currentDay);
+  const width = 170;
+  const height = 48;
+  const values = points.length > 0 ? points : [{ day: currentDay, tick: 0, price: previousClose, boardState: "loose" as BoardState }];
+  const prices = values.map((point) => point.price);
+  const min = Math.min(...prices, previousClose);
+  const max = Math.max(...prices, previousClose);
+  const span = Math.max(0.01, max - min);
+  const pad = span * 0.16;
+  const low = min - pad;
+  const high = max + pad;
+  const lastTickIndex = Math.max(1, GAME_CONFIG.ticksPerDay - 1);
+  const xForTick = (tick: number) => (Math.min(lastTickIndex, Math.max(0, tick)) / lastTickIndex) * width;
+  const yFor = (price: number) => height - ((price - low) / (high - low)) * height;
+  const line = values.map((point) => `${xForTick(point.tick).toFixed(1)},${yFor(point.price).toFixed(1)}`).join(" ");
+  const fill = `0,${height} ${line} ${xForTick(values.at(-1)?.tick ?? 0).toFixed(1)},${height}`;
+  const up = (values.at(-1)?.price ?? previousClose) >= previousClose;
+  const baseline = yFor(previousClose);
+
+  return (
+    <svg className={up ? "mini-sparkline up" : "mini-sparkline down"} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Mini intraday chart">
+      <line x1="0" x2={width} y1={baseline} y2={baseline} className="mini-baseline" />
+      <polyline points={fill} className="mini-area" />
+      <polyline points={line} className="mini-line" />
+    </svg>
   );
 }
 
@@ -1215,6 +1323,22 @@ function ProgressBar({ value, dayValue }: { value: number; dayValue?: number }) 
       )}
     </div>
   );
+}
+
+function calculateWeightedMarketValue(game: GameState): number {
+  return Object.values(game.stocks).reduce((total, stock) => total + stock.marketCap * stock.price, 0);
+}
+
+function calculateWhaleIndex(game: GameState, baseValue: number): WhaleIndexSnapshot {
+  const currentValue = calculateWeightedMarketValue(game);
+  const value = baseValue > 0 ? (currentValue / baseValue) * 1000 : 1000;
+  const change = value - 1000;
+  const changePct = (value / 1000 - 1) * 100;
+  return {
+    value,
+    change,
+    changePct
+  };
 }
 
 function createTradeMarks(results: TickResult[], stockId: StockId, currentDay: number): TradeMark[] {
