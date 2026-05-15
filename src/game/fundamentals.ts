@@ -67,6 +67,8 @@ export function deriveInitialFundamentals(
     | "microPrice"
     | "microstructure"
     | "shrimpCohorts"
+    | "options"
+    | "boardQueueLedger"
     | "sharesOutstanding"
     | "fairPe"
     | "earningsPerShare"

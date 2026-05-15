@@ -8,9 +8,12 @@ import {
   executeSellIntoDepth,
   getMarketCapClass
 } from "./marketDepth";
+import { MARKET_BEHAVIOR_CONFIG } from "./marketBehaviorConfig";
 import { getMarketMemory, type MarketMemorySnapshot } from "./marketMemory";
 import { applyExecutionPrice } from "./priceEngine";
 import { getWhalePositionPnlPct, markWhaleToMarket, recordWhaleBuy, recordWhaleSell } from "./whaleAccounting";
+
+const whaleConfig = MARKET_BEHAVIOR_CONFIG.whale;
 
 export type WhaleOrder = {
   whale: Whale;
@@ -20,6 +23,35 @@ export type WhaleOrder = {
   requestedCash?: number;
   requestedShares?: number;
 };
+
+type WhaleDecisionContext = {
+  game: GameState;
+  stock: Stock;
+  whale: Whale;
+  capClass: MarketCapClass;
+  effectiveDepth: number;
+  playerVisibility: number;
+  likesSector: boolean;
+  likesCap: boolean;
+  position: number;
+  positionPnlPct: number;
+  valuationGap: number;
+  dayChangePct: number;
+  runnerExhaustion: number;
+  gapFadeRisk: number;
+  staircaseRisk: boolean;
+  overextended: boolean;
+  veryOverextended: boolean;
+  profitableExit: boolean;
+  stopLossRisk: boolean;
+  deeplyDiscounted: boolean;
+  panicDip: boolean;
+  hotSector: boolean;
+  fragileBoard: boolean;
+  memory: MarketMemorySnapshot;
+};
+
+type WhaleStrategyHandler = (context: WhaleDecisionContext) => WhaleOrder | undefined;
 
 export function createWhaleOrders(game: GameState, stock: Stock, playerVisibility: number, effectiveDepth: number): WhaleOrder[] {
   const orders: WhaleOrder[] = [];
@@ -135,6 +167,32 @@ function createWhaleOrder(
     (stock.retail.fear > 74 && stock.retail.panicSellers > 62);
   const hotSector = game.sectors[stock.sector].attention > 52 || game.sectors[stock.sector].momentum > 8;
   const fragileBoard = stock.boardState === "weakSeal" || stock.boardState === "brokenBoard" || stock.boardState === "attackingLimitUp";
+  const context: WhaleDecisionContext = {
+    game,
+    stock,
+    whale,
+    capClass,
+    effectiveDepth,
+    playerVisibility,
+    likesSector,
+    likesCap,
+    position,
+    positionPnlPct,
+    valuationGap: valuation.valuationGap,
+    dayChangePct,
+    runnerExhaustion,
+    gapFadeRisk,
+    staircaseRisk,
+    overextended,
+    veryOverextended,
+    profitableExit,
+    stopLossRisk,
+    deeplyDiscounted,
+    panicDip,
+    hotSector,
+    fragileBoard,
+    memory
+  };
   const campaignOrder = createCampaignOrder(game, stock, whale, capClass, effectiveDepth, {
     likesSector,
     likesCap,
@@ -174,112 +232,8 @@ function createWhaleOrder(
     return requestedShares > 0 ? { whale, stock, side: "sell", intention, requestedShares } : undefined;
   }
 
-  if (whale.archetype === "pumpLord" && likesSector && likesCap) {
-    if (position > 0 && ((profitableExit && (stock.heat > whale.heatTolerance || stock.boardState === "sealedLimitUp" || overextended)) || stopLossRisk)) {
-      const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.11, dayChangePct, valuation.valuationGap, positionPnlPct);
-      return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
-    }
-
-    if (stock.attention < 54 && stock.heat < whale.heatTolerance * 0.72 && stock.momentum < 10 && valuation.valuationGap < 0.42 && !staircaseRisk) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.012, 0.075, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "accumulate", requestedCash } : undefined;
-    }
-
-    if (stock.attention >= 55 && stock.heat < whale.heatTolerance && valuation.valuationGap < 0.72 && memory.upStreak < 5) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.014, 0.08 + whale.aggression / 1_400, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "pump", requestedCash } : undefined;
-    }
-  }
-
-  if (whale.archetype === "quantKnife" && (likesSector || runnerExhaustion > 18 || gapFadeRisk > 12 || position > 0)) {
-    if (
-      position > 0 &&
-      ((profitableExit && (fragileBoard || veryOverextended || playerVisibility > 30 || stock.heat > whale.heatTolerance || memory.upStreak >= 4)) ||
-        stopLossRisk ||
-        runnerExhaustion > 24 ||
-        gapFadeRisk > 16)
-    ) {
-      const requestedShares = getWhaleSellShares(
-        stock,
-        position,
-        effectiveDepth,
-        0.065 + whale.aggression / 1_500,
-        dayChangePct,
-        valuation.valuationGap,
-        positionPnlPct
-      );
-      return requestedShares > 0 ? { whale, stock, side: "sell", intention: "attack", requestedShares } : undefined;
-    }
-
-    if (panicDip && stock.financialHealth > 48 && stock.heat < 75 && valuation.valuationGap < 0.12 && stock.microstructure.flowMemory > -18) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.012, 0.08, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "scoop", requestedCash } : undefined;
-    }
-  }
-
-  if (whale.archetype === "valueWall" && ((likesSector && likesCap) || (position > 0 && runnerExhaustion > 24))) {
-    if (position > 0 && ((profitableExit && (overextended || stock.retail.greed > 68)) || stopLossRisk)) {
-      const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.08, dayChangePct, valuation.valuationGap, positionPnlPct);
-      return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
-    }
-
-    if (deeplyDiscounted && stock.financialHealth > 58 && stock.retail.fear > 38 && (dayChangePct < -1.5 || memory.drawdownFrom10dHigh < -8)) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.014, 0.1, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "accumulate", requestedCash } : undefined;
-    }
-  }
-
-  if (whale.archetype === "bagholderWhale" && likesSector && likesCap) {
-    if (position > 0 && ((positionPnlPct > -0.02 && (stock.retail.greed > 52 || playerVisibility > 35 || stock.boardState === "sealedLimitUp")) || stopLossRisk)) {
-      const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.12, dayChangePct, valuation.valuationGap, positionPnlPct);
-      return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
-    }
-
-    if (position > 0 && stock.boardState === "weakSeal" && stock.boardStrength < 50 && whale.cash > 1_000_000 && !stopLossRisk) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.008, 0.055, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "defend", requestedCash } : undefined;
-    }
-  }
-
-  if (whale.archetype === "rescueWhale" && likesSector && capClass === "large") {
-    if ((game.market.sentiment < 44 || panicDip || stock.momentum < -28 || memory.drawdownFrom10dHigh < -12) && valuation.valuationGap < 0.18) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.014, 0.12, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "defend", requestedCash } : undefined;
-    }
-
-    if (position > 0 && profitableExit && stock.momentum > 24 && stock.retail.greed > 62 && valuation.valuationGap > 0.08) {
-      const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.05, dayChangePct, valuation.valuationGap, positionPnlPct);
-      return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
-    }
-  }
-
-  if (whale.archetype === "sectorRotator" && (likesCap || (position > 0 && runnerExhaustion > 24))) {
-    if (likesSector && hotSector && stock.heat < whale.heatTolerance && stock.boardState !== "limitDown" && valuation.valuationGap < 0.38 && memory.upStreak < 4) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.011, 0.075, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "rotate", requestedCash } : undefined;
-    }
-
-    if (
-      position > 0 &&
-      ((profitableExit && (!hotSector || stock.heat > whale.heatTolerance || stock.momentum < -10 || memory.upStreak >= 4 || runnerExhaustion > 24)) ||
-        stopLossRisk)
-    ) {
-      const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.075, dayChangePct, valuation.valuationGap, positionPnlPct);
-      return requestedShares > 0 ? { whale, stock, side: "sell", intention: "rotate", requestedShares } : undefined;
-    }
-  }
-
-  if (whale.archetype === "liquidityVulture" && ((likesSector && likesCap) || (position > 0 && runnerExhaustion > 26))) {
-    if (panicDip && stock.heat < 80 && valuation.valuationGap < 0.18 && (stock.microstructure.flowMemory > -22 || memory.drawdownFrom10dHigh < -14)) {
-      const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.016, 0.1, valuation.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "scoop", requestedCash } : undefined;
-    }
-
-    if (position > 0 && ((positionPnlPct > 0.04 && (stock.momentum > 14 || stock.retail.greed > 56 || playerVisibility > 30)) || stopLossRisk)) {
-      const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.1, dayChangePct, valuation.valuationGap, positionPnlPct);
-      return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
-    }
-  }
+  const archetypeOrder = whaleStrategyRegistry[whale.archetype](context);
+  if (archetypeOrder) return archetypeOrder;
 
   const probeOrder = createOpportunisticProbeOrder(game, stock, whale, effectiveDepth, {
     likesSector,
@@ -349,7 +303,7 @@ function createOpportunisticProbeOrder(
   }
 
   if (
-    whale.cash > 2_000_000 &&
+    whale.cash > whaleConfig.largeCashThreshold &&
     familiarity &&
     stock.boardState !== "sealedLimitUp" &&
     stock.boardState !== "limitDown" &&
@@ -357,10 +311,175 @@ function createOpportunisticProbeOrder(
     (context.memory.openingGapPct < -0.8 || context.memory.drawdownFrom10dHigh < -7 || stock.microstructure.flowMemory > 5)
   ) {
     const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.0045, 0.032, context.valuationGap);
-    return requestedCash > 350_000 ? { whale, stock, side: "buy", intention: "scoop", requestedCash } : undefined;
+    return requestedCash > whaleConfig.minimumProbeOrderCash ? { whale, stock, side: "buy", intention: "scoop", requestedCash } : undefined;
   }
 
   return undefined;
+}
+
+const whaleStrategyRegistry: Record<Whale["archetype"], WhaleStrategyHandler> = {
+  pumpLord: createPumpLordOrder,
+  quantKnife: createQuantKnifeOrder,
+  valueWall: createValueWallOrder,
+  rescueWhale: createRescueWhaleOrder,
+  bagholderWhale: createBagholderWhaleOrder,
+  sectorRotator: createSectorRotatorOrder,
+  liquidityVulture: createLiquidityVultureOrder
+};
+
+function createPumpLordOrder(context: WhaleDecisionContext): WhaleOrder | undefined {
+  const { stock, whale, position, positionPnlPct, effectiveDepth, dayChangePct, valuationGap } = context;
+  if (!context.likesSector || !context.likesCap) return undefined;
+
+  const heatExitConfig = whaleConfig.pumpLord;
+  const crowdedHeatExit =
+    stock.heat > whale.heatTolerance + heatExitConfig.heatExitToleranceBuffer &&
+    positionPnlPct > heatExitConfig.heatExitMaxLossPct &&
+    (stock.retail.greed > heatExitConfig.heatExitGreedMin ||
+      stock.attention > heatExitConfig.heatExitAttentionMin ||
+      context.playerVisibility > heatExitConfig.heatExitPlayerVisibilityMin);
+  if (
+    position > 0 &&
+    ((context.profitableExit && (stock.heat > whale.heatTolerance || stock.boardState === "sealedLimitUp" || context.overextended)) ||
+      context.stopLossRisk ||
+      crowdedHeatExit)
+  ) {
+    const requestedShares = getWhaleSellShares(
+      stock,
+      position,
+      effectiveDepth,
+      crowdedHeatExit ? heatExitConfig.heatExitDepthPct : 0.11,
+      dayChangePct,
+      valuationGap,
+      positionPnlPct
+    );
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
+  }
+
+  if (stock.attention < 54 && stock.heat < whale.heatTolerance * 0.72 && stock.momentum < 10 && valuationGap < 0.42 && !context.staircaseRisk) {
+    return createWhaleBuyOrder(context, "accumulate", 0.012, 0.075);
+  }
+
+  if (stock.attention >= 55 && stock.heat < whale.heatTolerance && valuationGap < 0.72 && context.memory.upStreak < 5) {
+    return createWhaleBuyOrder(context, "pump", 0.014, 0.08 + whale.aggression / 1_400);
+  }
+
+  return undefined;
+}
+
+function createQuantKnifeOrder(context: WhaleDecisionContext): WhaleOrder | undefined {
+  const { stock, whale, position, positionPnlPct, effectiveDepth, dayChangePct, valuationGap } = context;
+  if (!context.likesSector && context.runnerExhaustion <= 18 && context.gapFadeRisk <= 12 && position <= 0) return undefined;
+
+  if (
+    position > 0 &&
+    ((context.profitableExit &&
+      (context.fragileBoard || context.veryOverextended || context.playerVisibility > 30 || stock.heat > whale.heatTolerance || context.memory.upStreak >= 4)) ||
+      context.stopLossRisk ||
+      context.runnerExhaustion > 24 ||
+      context.gapFadeRisk > 16)
+  ) {
+    const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.065 + whale.aggression / 1_500, dayChangePct, valuationGap, positionPnlPct);
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: "attack", requestedShares } : undefined;
+  }
+
+  if (context.panicDip && stock.financialHealth > 48 && stock.heat < 75 && valuationGap < 0.12 && stock.microstructure.flowMemory > -18) {
+    return createWhaleBuyOrder(context, "scoop", 0.012, 0.08);
+  }
+
+  return undefined;
+}
+
+function createValueWallOrder(context: WhaleDecisionContext): WhaleOrder | undefined {
+  const { stock, whale, position, positionPnlPct, effectiveDepth, dayChangePct, valuationGap } = context;
+  if (!((context.likesSector && context.likesCap) || (position > 0 && context.runnerExhaustion > 24))) return undefined;
+
+  if (position > 0 && ((context.profitableExit && (context.overextended || stock.retail.greed > 68)) || context.stopLossRisk)) {
+    const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.08, dayChangePct, valuationGap, positionPnlPct);
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
+  }
+
+  if (context.deeplyDiscounted && stock.financialHealth > 58 && stock.retail.fear > 38 && (dayChangePct < -1.5 || context.memory.drawdownFrom10dHigh < -8)) {
+    return createWhaleBuyOrder(context, "accumulate", 0.014, 0.1);
+  }
+
+  return undefined;
+}
+
+function createBagholderWhaleOrder(context: WhaleDecisionContext): WhaleOrder | undefined {
+  const { stock, whale, position, positionPnlPct, effectiveDepth, dayChangePct, valuationGap } = context;
+  if (!context.likesSector || !context.likesCap) return undefined;
+
+  if (position > 0 && ((positionPnlPct > -0.02 && (stock.retail.greed > 52 || context.playerVisibility > 35 || stock.boardState === "sealedLimitUp")) || context.stopLossRisk)) {
+    const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.12, dayChangePct, valuationGap, positionPnlPct);
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
+  }
+
+  if (position > 0 && stock.boardState === "weakSeal" && stock.boardStrength < 50 && whale.cash > whaleConfig.largeCashThreshold / 2 && !context.stopLossRisk) {
+    return createWhaleBuyOrder(context, "defend", 0.008, 0.055);
+  }
+
+  return undefined;
+}
+
+function createRescueWhaleOrder(context: WhaleDecisionContext): WhaleOrder | undefined {
+  const { game, stock, whale, position, positionPnlPct, effectiveDepth, dayChangePct, valuationGap } = context;
+  if (!context.likesSector || context.capClass !== "large") return undefined;
+
+  if ((game.market.sentiment < 44 || context.panicDip || stock.momentum < -28 || context.memory.drawdownFrom10dHigh < -12) && valuationGap < 0.18) {
+    return createWhaleBuyOrder(context, "defend", 0.014, 0.12);
+  }
+
+  if (position > 0 && context.profitableExit && stock.momentum > 24 && stock.retail.greed > 62 && valuationGap > 0.08) {
+    const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.05, dayChangePct, valuationGap, positionPnlPct);
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
+  }
+
+  return undefined;
+}
+
+function createSectorRotatorOrder(context: WhaleDecisionContext): WhaleOrder | undefined {
+  const { stock, whale, position, positionPnlPct, effectiveDepth, dayChangePct, valuationGap } = context;
+  if (!context.likesCap && !(position > 0 && context.runnerExhaustion > 24)) return undefined;
+
+  if (context.likesSector && context.hotSector && stock.heat < whale.heatTolerance && stock.boardState !== "limitDown" && valuationGap < 0.38 && context.memory.upStreak < 4) {
+    return createWhaleBuyOrder(context, "rotate", 0.011, 0.075);
+  }
+
+  if (
+    position > 0 &&
+    ((context.profitableExit &&
+      (!context.hotSector || stock.heat > whale.heatTolerance || stock.momentum < -10 || context.memory.upStreak >= 4 || context.runnerExhaustion > 24)) ||
+      context.stopLossRisk)
+  ) {
+    const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.075, dayChangePct, valuationGap, positionPnlPct);
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: "rotate", requestedShares } : undefined;
+  }
+
+  return undefined;
+}
+
+function createLiquidityVultureOrder(context: WhaleDecisionContext): WhaleOrder | undefined {
+  const { stock, whale, position, positionPnlPct, effectiveDepth, dayChangePct, valuationGap } = context;
+  if (!((context.likesSector && context.likesCap) || (position > 0 && context.runnerExhaustion > 26))) return undefined;
+
+  if (context.panicDip && stock.heat < 80 && valuationGap < 0.18 && (stock.microstructure.flowMemory > -22 || context.memory.drawdownFrom10dHigh < -14)) {
+    return createWhaleBuyOrder(context, "scoop", 0.016, 0.1);
+  }
+
+  if (position > 0 && ((positionPnlPct > 0.04 && (stock.momentum > 14 || stock.retail.greed > 56 || context.playerVisibility > 30)) || context.stopLossRisk)) {
+    const requestedShares = getWhaleSellShares(stock, position, effectiveDepth, 0.1, dayChangePct, valuationGap, positionPnlPct);
+    return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
+  }
+
+  return undefined;
+}
+
+function createWhaleBuyOrder(context: WhaleDecisionContext, intention: WhaleIntention, cashPct: number, depthPct: number): WhaleOrder | undefined {
+  const requestedCash = getWhaleBuyCash(context.whale, context.stock, context.effectiveDepth, cashPct, depthPct, context.valuationGap);
+  return requestedCash > whaleConfig.minimumOrderCash
+    ? { whale: context.whale, stock: context.stock, side: "buy", intention, requestedCash }
+    : undefined;
 }
 
 function createCampaignOrder(
@@ -404,7 +523,7 @@ function createCampaignOrder(
 
     if (stock.price < getCampaignMaxEntryPrice(stock, context.valuationGap) && stock.boardState !== "sealedLimitUp") {
       const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, 0.018, 0.12, context.valuationGap);
-      return requestedCash > 500_000 ? { whale, stock, side: "buy", intention: "accumulate", requestedCash } : undefined;
+      return requestedCash > whaleConfig.minimumOrderCash ? { whale, stock, side: "buy", intention: "accumulate", requestedCash } : undefined;
     }
   }
 
@@ -423,7 +542,7 @@ function createCampaignOrder(
       const depthPct = whale.archetype === "pumpLord" ? 1.65 : 1.15;
       const cashPct = whale.archetype === "pumpLord" ? 0.16 : 0.09;
       const requestedCash = getWhaleBuyCash(whale, stock, effectiveDepth, cashPct, depthPct, context.valuationGap);
-      return requestedCash > 750_000 ? { whale, stock, side: "buy", intention: "pump", requestedCash } : undefined;
+      return requestedCash > whaleConfig.minimumMarkupOrderCash ? { whale, stock, side: "buy", intention: "pump", requestedCash } : undefined;
     }
   }
 
@@ -433,7 +552,7 @@ function createCampaignOrder(
       return requestedShares > 0 ? { whale, stock, side: "sell", intention: "dump", requestedShares } : undefined;
     }
 
-    if ((context.dayChangePct < -4.2 || context.memory.drawdownFrom10dHigh < -11) && context.valuationGap < 0.16 && whale.cash > 2_000_000) {
+    if ((context.dayChangePct < -4.2 || context.memory.drawdownFrom10dHigh < -11) && context.valuationGap < 0.16 && whale.cash > whaleConfig.largeCashThreshold) {
       setCampaignPhase(game, whale, "accumulate");
     }
   }
@@ -502,12 +621,12 @@ function isBestWhaleOpportunity(game: GameState, stock: Stock, whale: Whale, pla
   }
   if (currentScore >= bestScore) return true;
 
-  const nearBest = currentScore >= bestScore * 0.78 && currentScore > 22;
-  const compelling = currentScore > 42;
+  const nearBest = currentScore >= bestScore * whaleConfig.opportunity.nearBestRatio && currentScore > whaleConfig.opportunity.nearBestMinScore;
+  const compelling = currentScore > whaleConfig.opportunity.compellingScore;
   if (!nearBest && !compelling) return false;
 
   const rng = createRng(`${game.rngSeed}:whale-opportunity:${game.day}:${game.tick}:${whale.id}:${stock.id}`);
-  return rng.chance(compelling ? 0.34 : 0.18);
+  return rng.chance(compelling ? whaleConfig.opportunity.compellingChance : whaleConfig.opportunity.nearBestChance);
 }
 
 function scoreWhaleOpportunity(game: GameState, stock: Stock, whale: Whale, playerVisibility: number): number {
@@ -584,18 +703,20 @@ function scoreWhaleOpportunity(game: GameState, stock: Stock, whale: Whale, play
 }
 
 function getRunnerExhaustion(stock: Stock, memory: MarketMemorySnapshot, valuationGap: number): number {
-  const smoothRunnerBonus = memory.greenDays5d >= 4 && memory.realizedVolatility5d < 3.2 ? 8 : 0;
+  const config = whaleConfig.runnerExhaustion;
+  const smoothRunnerBonus =
+    memory.greenDays5d >= config.smoothRunnerGreenDays && memory.realizedVolatility5d < config.smoothRunnerVolatilityMax ? config.smoothRunnerBonus : 0;
   return Math.max(
     0,
-    Math.max(0, memory.return5d - 9) * 1.28 +
-      Math.max(0, memory.return10d - 16) * 0.58 +
-      Math.max(0, memory.upStreak - 2) * 5 +
-      Math.max(0, memory.greenDays5d - 3) * 5 +
-      Math.max(0, memory.ma5Deviation - 5.5) * 1.4 +
-      Math.max(0, memory.openingGapPct - 2) * 2.4 +
-      Math.max(0, -memory.openingGapPct - 0.7) * Math.max(0, memory.openToNowPct - 0.8) * 1.55 +
-      Math.max(0, valuationGap - 0.3) * 32 +
-      Math.max(0, stock.price / Math.max(0.01, stock.avgHolderCost) - 1.08) * 34 +
+    Math.max(0, memory.return5d - config.return5dThreshold) * config.return5dWeight +
+      Math.max(0, memory.return10d - config.return10dThreshold) * config.return10dWeight +
+      Math.max(0, memory.upStreak - config.upStreakThreshold) * config.upStreakWeight +
+      Math.max(0, memory.greenDays5d - config.greenDaysThreshold) * config.greenDaysWeight +
+      Math.max(0, memory.ma5Deviation - config.ma5DeviationThreshold) * config.ma5DeviationWeight +
+      Math.max(0, memory.openingGapPct - config.openingGapThreshold) * config.openingGapWeight +
+      Math.max(0, -memory.openingGapPct - config.gapFadeOpeningThreshold) * Math.max(0, memory.openToNowPct - config.gapFadeOpenToNowThreshold) * config.gapFadeWeight +
+      Math.max(0, valuationGap - config.valuationThreshold) * config.valuationWeight +
+      Math.max(0, stock.price / Math.max(MARKET_BEHAVIOR_CONFIG.units.minPrice, stock.avgHolderCost) - config.holderCostPremium) * config.holderCostWeight +
       smoothRunnerBonus
   );
 }
@@ -620,27 +741,13 @@ function getAbsoluteTick(game: GameState): number {
 }
 
 function getWhaleCooldown(whale: Whale, intention: WhaleIntention): number {
-  const archetypeBase: Record<Whale["archetype"], number> = {
-    pumpLord: 4,
-    quantKnife: 3,
-    valueWall: 8,
-    rescueWhale: 10,
-    bagholderWhale: 5,
-    sectorRotator: 6,
-    liquidityVulture: 5
-  };
-  const intentionModifier: Partial<Record<WhaleIntention, number>> = {
-    accumulate: 2,
-    pump: 1,
-    defend: 1,
-    attack: 1,
-    dump: 2,
-    rotate: 3,
-    scoop: 2
-  };
-  const patienceDelay = Math.round(whale.patience / 28);
-  const aggressionDiscount = Math.round(whale.aggression / 45);
-  return Math.max(2, archetypeBase[whale.archetype] + (intentionModifier[intention] ?? 0) + patienceDelay - aggressionDiscount);
+  const intentionModifier = whaleConfig.cooldown.intentionModifier as Partial<Record<WhaleIntention, number>>;
+  const patienceDelay = Math.round(whale.patience / whaleConfig.cooldown.patienceDivisor);
+  const aggressionDiscount = Math.round(whale.aggression / whaleConfig.cooldown.aggressionDivisor);
+  return Math.max(
+    whaleConfig.cooldown.minimumTicks,
+    whaleConfig.cooldown.archetypeBase[whale.archetype] + (intentionModifier[intention] ?? 0) + patienceDelay - aggressionDiscount
+  );
 }
 
 function getWhaleBuyCash(
@@ -675,7 +782,7 @@ function getWhaleSellShares(
 }
 
 function appendWhaleEvent(game: GameState, stock: Stock, fill: ExecutionFill): void {
-  if (fill.filledNotional < 750_000) return;
+  if (fill.filledNotional < whaleConfig.eventNotionalThreshold) return;
 
   const verb = fill.side === "buy" ? "bought" : "sold";
   game.eventLog.push({

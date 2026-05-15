@@ -1,5 +1,16 @@
 import { clamp, GAME_CONFIG } from "../game/config";
 import type { BoardState, BoardType, Pressure, Stock } from "../game/types";
+import {
+  addBoardQueue,
+  consumeBoardQueue,
+  decayBoardQueue,
+  getBoardQueueBufferMultiplier,
+  getBoardQueueQuality,
+  getQueueSourceWeightsFromPressure
+} from "./boardQueueLedger";
+import { MARKET_BEHAVIOR_CONFIG } from "./marketBehaviorConfig";
+
+const boardConfig = MARKET_BEHAVIOR_CONFIG.board;
 
 export function getLimitRatio(boardTypeOrStock: BoardType | Stock): number {
   const boardType = typeof boardTypeOrStock === "string" ? boardTypeOrStock : boardTypeOrStock.boardType;
@@ -21,12 +32,14 @@ export function updateBoardState(stock: Stock, pressure: Pressure): BoardState {
   const lowerLimit = getLowerLimit(stock);
   const previousState = stock.boardState;
   const limitRatio = getLimitRatio(stock);
-  const dayChangePct = ((stock.price - stock.previousClose) / stock.previousClose) * 100;
-  const nearLimitUp = stock.price >= stock.previousClose * (1 + limitRatio * 0.82);
-  const materialDrop = dayChangePct <= -Math.max(2.5, limitRatio * 100 * 0.34);
-  const severeDrop = dayChangePct <= -Math.max(4, limitRatio * 100 * 0.52);
-  const fearCanSnowball = stock.retail.fear > 62 && stock.retail.panicSellers > 54;
-  const sellImbalance = pressure.sellPressure > pressure.buyPressure * 2.25;
+  const dayChangePct = ((stock.price - stock.previousClose) / stock.previousClose) * MARKET_BEHAVIOR_CONFIG.units.percentScale;
+  const nearLimitUp = stock.price >= stock.previousClose * (1 + limitRatio * boardConfig.nearLimitUpProgress);
+  const materialDrop =
+    dayChangePct <= -Math.max(boardConfig.materialDropPctFloor, limitRatio * MARKET_BEHAVIOR_CONFIG.units.percentScale * boardConfig.materialDropLimitScale);
+  const severeDrop =
+    dayChangePct <= -Math.max(boardConfig.severeDropPctFloor, limitRatio * MARKET_BEHAVIOR_CONFIG.units.percentScale * boardConfig.severeDropLimitScale);
+  const fearCanSnowball = stock.retail.fear > boardConfig.fearSnowballThreshold && stock.retail.panicSellers > boardConfig.panicSellerSnowballThreshold;
+  const sellImbalance = pressure.sellPressure > pressure.buyPressure * boardConfig.sellImbalanceMultiple;
   const buyConviction = getBuyConvictionRatio(pressure);
   const queueConviction = clamp(
     buyConviction + Math.max(0, pressure.buyPressure - pressure.sellPressure) / Math.max(1, stock.currentLiquidity) * 0.24,
@@ -37,28 +50,38 @@ export function updateBoardState(stock: Stock, pressure: Pressure): BoardState {
   if (stock.price >= upperLimit) {
     const netBuy = pressure.buyPressure - pressure.sellPressure;
     if (netBuy >= 0) {
-      stock.buyQueue = stock.buyQueue * 0.965 + netBuy * (0.5 + queueConviction * 0.42);
-      stock.sellQueue *= 0.72;
+      decayBoardQueue(stock, "buy", 0.965);
+      addBoardQueue(stock, "buy", netBuy * (0.5 + queueConviction * 0.42), getQueueSourceWeightsFromPressure(pressure, "buy"));
+      decayBoardQueue(stock, "sell", 0.72);
     } else {
       const sellExcess = Math.abs(netBuy);
-      const queueBuffer = stock.buyQueue * (previousState === "sealedLimitUp" ? 0.34 : 0.2) * (0.85 + buyConviction);
+      const queueBuffer =
+        stock.buyQueue *
+        (previousState === "sealedLimitUp" ? 0.34 : 0.2) *
+        (0.85 + buyConviction) *
+        getBoardQueueBufferMultiplier(stock, "buy");
       const unabsorbedSell = Math.max(0, sellExcess - queueBuffer);
-      stock.buyQueue = Math.max(0, stock.buyQueue * 0.9 - unabsorbedSell * (0.34 + (1 - buyConviction) * 0.14));
-      stock.sellQueue = stock.sellQueue * 0.72 + unabsorbedSell * (0.34 + (1 - buyConviction) * 0.1);
+      decayBoardQueue(stock, "buy", 0.9);
+      consumeBoardQueue(stock, "buy", unabsorbedSell * (0.34 + (1 - buyConviction) * 0.14));
+      decayBoardQueue(stock, "sell", 0.72);
+      addBoardQueue(stock, "sell", unabsorbedSell * (0.34 + (1 - buyConviction) * 0.1), getQueueSourceWeightsFromPressure(pressure, "sell"));
     }
   } else if (stock.price <= lowerLimit) {
     const netSell = pressure.sellPressure - pressure.buyPressure;
     if (netSell >= 0) {
-      stock.sellQueue = stock.sellQueue * 0.95 + netSell * 0.62;
-      stock.buyQueue *= 0.7;
+      decayBoardQueue(stock, "sell", 0.95);
+      addBoardQueue(stock, "sell", netSell * 0.62, getQueueSourceWeightsFromPressure(pressure, "sell"));
+      decayBoardQueue(stock, "buy", 0.7);
     } else {
       const buyExcess = Math.abs(netSell);
-      stock.sellQueue = Math.max(0, stock.sellQueue * 0.86 - buyExcess * 0.36);
-      stock.buyQueue = stock.buyQueue * 0.72 + buyExcess * 0.44;
+      decayBoardQueue(stock, "sell", 0.86);
+      consumeBoardQueue(stock, "sell", buyExcess * 0.36);
+      decayBoardQueue(stock, "buy", 0.72);
+      addBoardQueue(stock, "buy", buyExcess * 0.44, getQueueSourceWeightsFromPressure(pressure, "buy"));
     }
   } else {
-    stock.buyQueue *= 0.72;
-    stock.sellQueue *= 0.78;
+    decayBoardQueue(stock, "buy", 0.72);
+    decayBoardQueue(stock, "sell", 0.78);
   }
 
   const hiddenExitRisk =
@@ -67,14 +90,26 @@ export function updateBoardState(stock: Stock, pressure: Pressure): BoardState {
     stock.heat * 0.35 +
     (previousState === "weakSeal" ? 18 : 0) +
     (stock.price >= upperLimit ? (1 - buyConviction) * 24 : 0);
-  const denominator = stock.buyQueue + pressure.sellPressure + hiddenExitRisk + 1;
-  stock.boardStrength = clamp((stock.buyQueue / denominator) * 100, 0, 100);
-  const largeCapBoardBrake = stock.marketCap > 50_000_000_000 ? 1.9 : stock.marketCap > 10_000_000_000 ? 1.18 : 1;
-  const queueIsDeep = stock.buyQueue > stock.currentLiquidity * (0.075 + (1 - buyConviction) * 0.075) * largeCapBoardBrake;
+  const qualityAdjustedBuyQueue = stock.buyQueue * (0.7 + getBoardQueueQuality(stock, "buy") * 0.6);
+  const denominator = qualityAdjustedBuyQueue + pressure.sellPressure + hiddenExitRisk + 1;
+  stock.boardStrength = clamp((qualityAdjustedBuyQueue / denominator) * 100, 0, 100);
+  const largeCapBoardBrake =
+    stock.marketCap > MARKET_BEHAVIOR_CONFIG.marketCap.midMax
+      ? boardConfig.largeCapBoardBrake
+      : stock.marketCap > MARKET_BEHAVIOR_CONFIG.marketCap.smallMax
+        ? boardConfig.midCapBoardBrake
+        : boardConfig.smallCapBoardBrake;
+  const queueIsDeep =
+    qualityAdjustedBuyQueue >
+    stock.currentLiquidity * (boardConfig.queueDepthBase + (1 - buyConviction) * boardConfig.queueDepthConvictionWeight) * largeCapBoardBrake;
   const sealHasConviction =
-    buyConviction >= (stock.marketCap > 50_000_000_000 ? 0.36 : 0.24) ||
-    pressure.buyPressure > pressure.sellPressure * (stock.marketCap > 50_000_000_000 ? 2.25 : 1.6);
-  const queueAbsorbsSell = stock.buyQueue > Math.max(pressure.sellPressure * 0.82, stock.currentLiquidity * 0.04);
+    buyConviction >=
+      (stock.marketCap > MARKET_BEHAVIOR_CONFIG.marketCap.midMax ? boardConfig.sealConvictionLarge : boardConfig.sealConvictionDefault) ||
+    pressure.buyPressure >
+      pressure.sellPressure *
+        (stock.marketCap > MARKET_BEHAVIOR_CONFIG.marketCap.midMax ? boardConfig.sealPressureMultipleLarge : boardConfig.sealPressureMultipleDefault);
+  const queueAbsorbsSell =
+    qualityAdjustedBuyQueue * getBoardQueueBufferMultiplier(stock, "buy") > Math.max(pressure.sellPressure * 0.82, stock.currentLiquidity * 0.04);
 
   if (stock.price <= lowerLimit) {
     stock.boardState = "limitDown";
@@ -90,9 +125,13 @@ export function updateBoardState(stock: Stock, pressure: Pressure): BoardState {
     stock.boardState = "attackingLimitUp";
   } else if (stock.price < upperLimit) {
     stock.boardState = "loose";
-  } else if (stock.boardStrength >= (stock.marketCap > 50_000_000_000 ? 76 : 66) && queueIsDeep && sealHasConviction) {
+  } else if (
+    stock.boardStrength >= (stock.marketCap > MARKET_BEHAVIOR_CONFIG.marketCap.midMax ? boardConfig.sealedStrengthLarge : boardConfig.sealedStrengthDefault) &&
+    queueIsDeep &&
+    sealHasConviction
+  ) {
     stock.boardState = "sealedLimitUp";
-  } else if (stock.boardStrength >= 36 || queueIsDeep) {
+  } else if (stock.boardStrength >= boardConfig.weakSealStrength || queueIsDeep) {
     stock.boardState = "weakSeal";
   } else {
     stock.boardState = "brokenBoard";

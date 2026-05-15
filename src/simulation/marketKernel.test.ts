@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GAME_CONFIG } from "../game/config";
 import { createInitialGame } from "../game/createInitialGame";
 import { updateValuationFromPrice } from "../game/fundamentals";
+import { setBoardQueue } from "./boardQueueLedger";
 import { getLowerLimit, getUpperLimit, updateBoardState } from "./boardEngine";
 import { calculateFundamentalPressure } from "./fundamentalEngine";
 import { createMarketDepth, executeBuyFromDepth, executeSellIntoDepth } from "./marketDepth";
@@ -407,6 +408,30 @@ describe("headless market kernel", () => {
     expect(trace.bidNotional).toBe(0);
     expect(trace.playerFills[0]?.filledShares ?? 0).toBe(0);
     expect(game.player.positions.GOLDEN_ROOF?.sellableShares).toBe(5_000_000);
+  });
+
+  it("keeps limit-down prints pinned while the sell queue ledger holds", () => {
+    const game = createInitialGame("limit-down-pin-ledger-test");
+    advanceToIntraday(game);
+    const stock = game.stocks.GOLDEN_ROOF;
+    const lowerLimit = getLowerLimit(stock);
+    stock.price = lowerLimit;
+    stock.open = lowerLimit;
+    stock.high = lowerLimit;
+    stock.low = lowerLimit;
+    stock.microPrice = lowerLimit;
+    stock.boardState = "limitDown";
+    setBoardQueue(stock, "sell", 50_000_000, { institution: 10_000_000, retail: 40_000_000 });
+
+    const prices: number[] = [];
+    for (let tick = 0; tick < 25; tick += 1) {
+      updateTick(game);
+      prices.push(stock.price);
+    }
+
+    expect(new Set(prices)).toEqual(new Set([lowerLimit]));
+    expect(stock.boardQueueLedger.sell.lockedTicks).toBeGreaterThan(0);
+    expect(stock.boardQueueLedger.sell.quality).toBeGreaterThan(0);
   });
 
   it("consumes limit-up buy queue instead of replacing it", () => {

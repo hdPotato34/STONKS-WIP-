@@ -1,0 +1,290 @@
+{
+  "tilts": {
+    "speculative": {
+      "offset": 95,
+      "scale": 135,
+      "features": {
+        "retail.gamblers": 1,
+        "retail.boardFaith": 1,
+        "attention": 1
+      }
+    },
+    "value": {
+      "offset": 95,
+      "scale": 145,
+      "features": {
+        "financialHealth": 1,
+        "peDiscount16": 4,
+        "institutionPresence": 1
+      }
+    },
+    "trapped": {
+      "offset": 85,
+      "scale": 130,
+      "features": {
+        "retail.bagholders": 1,
+        "retail.panicSellers": 1,
+        "cost.loss": 1
+      }
+    },
+    "momentum": {
+      "offset": 70,
+      "scale": 135,
+      "features": {
+        "retail.momentum": 1,
+        "quantPresence": 1,
+        "absMomentum": 1
+      }
+    }
+  },
+  "capBoosts": {
+    "smallCapSpeculation": {
+      "small": 1.18,
+      "mid": 1,
+      "large": 0.72
+    },
+    "valueHolder": {
+      "small": 0.88,
+      "mid": 0.88,
+      "large": 0.86
+    },
+    "capitalBase": {
+      "small": 1,
+      "mid": 1,
+      "large": 0.78
+    }
+  },
+  "capitalBase": {
+    "base": 1.8,
+    "attentionScale": 80,
+    "retailAttentionScale": 120,
+    "bagholderScale": 180
+  },
+  "strategies": {
+    "boardChaser": {
+      "weight": {
+        "base": 0.09,
+        "tilt": "speculative",
+        "tiltWeight": 0.34,
+        "capBoost": "smallCapSpeculation"
+      },
+      "conviction": {
+        "base": 42,
+        "features": {
+          "retail.boardFaith": 0.38,
+          "retail.greed": 0.18
+        }
+      },
+      "activity": {
+        "base": 34,
+        "features": {
+          "attention": 0.28
+        }
+      },
+      "riskAppetite": {
+        "base": 62,
+        "features": {
+          "retail.gamblers": 0.32
+        }
+      },
+      "orderSize": {
+        "priceThreshold": 8,
+        "below": 1800,
+        "default": 900
+      },
+      "inventoryRatio": {
+        "base": 0.22,
+        "tilt": "speculative",
+        "tiltWeight": 0.24
+      }
+    },
+    "momentumScalper": {
+      "weight": {
+        "base": 0.14,
+        "tilt": "momentum",
+        "tiltWeight": 0.24
+      },
+      "conviction": {
+        "base": 38,
+        "features": {
+          "retail.momentum": 0.34
+        }
+      },
+      "activity": {
+        "base": 44,
+        "features": {
+          "quantPresence": 0.24
+        }
+      },
+      "riskAppetite": {
+        "base": 48,
+        "tilt": "momentum",
+        "tiltWeight": 36
+      },
+      "orderSize": {
+        "priceThreshold": 10,
+        "below": 1200,
+        "default": 500
+      },
+      "inventoryRatio": {
+        "base": 0.18,
+        "features": {
+          "positiveMomentum": 0.002631578947368421
+        }
+      }
+    },
+    "dipBuyer": {
+      "weight": {
+        "base": 0.14,
+        "tilt": "value",
+        "tiltWeight": 0.12,
+        "features": {
+          "retail.dipBuyers": 0.0032258064516129032
+        }
+      },
+      "conviction": {
+        "base": 40,
+        "features": {
+          "retail.dipBuyers": 0.32,
+          "financialHealth": 0.12
+        }
+      },
+      "activity": {
+        "base": 30,
+        "features": {
+          "retail.attention": 0.16
+        }
+      },
+      "riskAppetite": {
+        "base": 38,
+        "features": {
+          "retail.dipBuyers": 0.22
+        }
+      },
+      "orderSize": {
+        "priceThreshold": 10,
+        "below": 1500,
+        "default": 600
+      },
+      "inventoryRatio": {
+        "base": 0.24,
+        "features": {
+          "cost.loss": 0.004545454545454545
+        }
+      }
+    },
+    "panicCutter": {
+      "weight": {
+        "base": 0.1,
+        "tilt": "trapped",
+        "tiltWeight": 0.3
+      },
+      "conviction": {
+        "base": 36,
+        "features": {
+          "retail.fear": 0.24,
+          "retail.panicSellers": 0.28
+        }
+      },
+      "activity": {
+        "base": 28,
+        "features": {
+          "retail.panicSellers": 0.28
+        }
+      },
+      "riskAppetite": {
+        "base": 18,
+        "features": {
+          "inverseRetailFear": 0.22
+        }
+      },
+      "orderSize": {
+        "priceThreshold": 10,
+        "below": 1000,
+        "default": 400
+      },
+      "inventoryRatio": {
+        "base": 0.48,
+        "features": {
+          "cost.loss": 0.007692307692307693,
+          "cost.deepLoss": 0.008333333333333333
+        }
+      }
+    },
+    "valueHolder": {
+      "weight": {
+        "base": 0.11,
+        "tilt": "value",
+        "tiltWeight": 0.36,
+        "capBoost": "valueHolder"
+      },
+      "conviction": {
+        "base": 46,
+        "features": {
+          "financialHealth": 0.34,
+          "peDiscount18": 1.5
+        }
+      },
+      "activity": {
+        "base": 18,
+        "features": {
+          "institutionPresence": 0.12
+        }
+      },
+      "riskAppetite": {
+        "base": 22,
+        "features": {
+          "financialHealth": 0.18
+        }
+      },
+      "orderSize": {
+        "priceThreshold": 10,
+        "below": 3000,
+        "default": 1000
+      },
+      "inventoryRatio": {
+        "base": 0.62,
+        "tilt": "value",
+        "tiltWeight": 0.24
+      }
+    },
+    "noiseTrader": {
+      "weight": {
+        "base": 0.2,
+        "features": {
+          "attention": 0.0022727272727272726
+        }
+      },
+      "conviction": {
+        "base": 34,
+        "features": {
+          "retail.attention": 0.16
+        }
+      },
+      "activity": {
+        "base": 52,
+        "features": {
+          "attention": 0.18
+        }
+      },
+      "riskAppetite": {
+        "base": 42,
+        "features": {
+          "retail.gamblers": 0.16
+        }
+      },
+      "orderSize": {
+        "priceThreshold": 10,
+        "below": 500,
+        "default": 200
+      },
+      "inventoryRatio": {
+        "base": 0.26
+      }
+    }
+  },
+  "capitalWeightFloor": 0.01,
+  "inventoryRatioMin": 0.05,
+  "inventoryRatioMax": 0.92,
+  "minOrderSize": 100
+}

@@ -1,0 +1,550 @@
+{
+  "units": {
+    "percentScale": 100,
+    "scoreScale": 100,
+    "priceTick": 0.01,
+    "minPrice": 0.01,
+    "boardLotShares": 100
+  },
+  "marketCap": {
+    "smallMax": 10000000000,
+    "midMax": 50000000000
+  },
+  "memorySignals": {
+    "overrunFatigue": {
+      "return5dThreshold": 14,
+      "return5dWeight": 0.17,
+      "return10dThreshold": 22,
+      "return10dWeight": 0.07,
+      "upStreakThreshold": 2,
+      "upStreakWeight": 0.95,
+      "greenDaysThreshold": 3,
+      "greenDaysWeight": 0.9,
+      "ma5DeviationThreshold": 6,
+      "ma5DeviationWeight": 0.22,
+      "valuationEligibleReturn5d": 8,
+      "valuationEligibleGreenDays": 4,
+      "valuationGapThreshold": 0.5,
+      "valuationWeightAfterLimitUp": 0.75,
+      "valuationWeightDefault": 2.2
+    },
+    "washoutAttention": {
+      "drawdownThreshold": 9,
+      "drawdownWeight": 0.42,
+      "downStreakThreshold": 1,
+      "downStreakWeight": 2.4
+    }
+  },
+  "stockOptions": {
+    "deepLiquidityMin": 160000000,
+    "thinLiquidityMax": 70000000,
+    "speculation": {
+      "quantPresenceWeight": 0.35,
+      "heatWeight": 0.5,
+      "highThreshold": 170,
+      "mediumThreshold": 115
+    },
+    "quality": {
+      "qualityMinHealth": 70,
+      "distressedMaxHealth": 42
+    },
+    "valuation": {
+      "deepValuePeMax": 12,
+      "expensivePeMin": 38,
+      "storyPeMin": 70,
+      "storyPeSoftMin": 45,
+      "storySpeculationMin": 155
+    },
+    "behaviorTags": {
+      "storySensitiveSpeculationMin": 170,
+      "trappedFloatMin": 105,
+      "dipBidMin": 54,
+      "institutionalPresenceMin": 65,
+      "quantActiveMin": 55,
+      "boardChaseGamblersMin": 58,
+      "boardChaseFaithMin": 48,
+      "fragileFearMin": 45
+    }
+  },
+  "eventLog": {
+    "maxEntries": 2000
+  },
+  "marketBreadth": {
+    "sector": {
+      "sentimentSpeed": 0.06,
+      "attentionSpeed": 0.08,
+      "momentumSpeed": 0.1,
+      "returnMomentumWeight": 5.2,
+      "breadthSentimentWeight": 16,
+      "returnSentimentWeight": 2.4,
+      "avgStockSentimentWeight": 0.28,
+      "hotBoardSentimentWeight": 10,
+      "weakBoardSentimentWeight": 14,
+      "attentionStockWeight": 0.55,
+      "heatAttentionWeight": 0.28,
+      "turnoverAttentionWeight": 115,
+      "boardAttentionWeight": 24,
+      "limitUpMomentumWeight": 12,
+      "limitDownMomentumWeight": 14,
+      "panicMomentumWeight": 8
+    },
+    "market": {
+      "sentimentSpeed": 0.045,
+      "liquiditySpeed": 0.035,
+      "volatilitySpeed": 0.045,
+      "returnSentimentWeight": 1.8,
+      "breadthSentimentWeight": 18,
+      "boardSentimentWeight": 14,
+      "sectorSentimentWeight": 0.35,
+      "liquidityBase": 58,
+      "liquidityBreadthWeight": 8,
+      "liquidityStressWeight": 18,
+      "liquidityPanicWeight": 16,
+      "liquidityHeatWeight": 0.08,
+      "volatilityBase": 42,
+      "volatilityReturnWeight": 1.8,
+      "volatilityStressWeight": 0.22,
+      "volatilityBoardWeight": 42,
+      "volatilityHeatWeight": 0.18,
+      "bullSentimentMin": 60,
+      "bullMomentumMin": 6,
+      "bearSentimentMax": 42,
+      "bearLimitDownShareMin": 0.12,
+      "bearPanicShareMin": 0.18
+    }
+  },
+  "tick": {
+    "participantFootprint": {
+      "playerExecutedBuy": 0.05,
+      "playerExecutedSell": 0.08,
+      "whaleExecuted": 0.12
+    },
+    "heatCauses": {
+      "playerLiquidityScale": 0.45,
+      "whaleLiquidityScale": 0.22,
+      "quantLiquidityScale": 0.08,
+      "fundamentalLiquidityScale": 0.06,
+      "fundamentalHeatCap": 0.4,
+      "newsImpactHeatScale": 120,
+      "newsHeatCap": 0.45,
+      "newsSentimentScale": 70,
+      "boardHardStateHeat": 0.8,
+      "boardSoftStateHeat": 0.45,
+      "priceMovePctThreshold": 1.5,
+      "priceMoveHeatPerPct": 0.08,
+      "priceMoveHeatCap": 0.9,
+      "priceMoveSentimentDelta": 0.2,
+      "netHeatTraceThreshold": 0.01
+    }
+  },
+  "news": {
+    "pressurePerImpactPoint": 0,
+    "actorEffects": {
+      "attentionPerAbsImpact": 0.052,
+      "heatPerAbsImpact": 0.036,
+      "sentimentPerImpact": 0.045,
+      "retailAttentionPerAbsImpact": 0.054,
+      "newsFollowersPerAbsImpact": 0.065,
+      "greedPerPositiveImpact": 0.038,
+      "boardFaithPerPositiveImpact": 0.026,
+      "fearPerNegativeImpact": 0.05,
+      "panicSellersPerNegativeImpact": 0.028,
+      "dipBuyersPerNegativeImpact": 0.02
+    }
+  },
+  "playerOrders": {
+    "defaultRestingBuyTicks": 5,
+    "heatImpactPerVisibility": 0.12,
+    "sellHeatImpactPerVisibility": 0.14,
+    "restingHeatTickShare": 0.35,
+    "upperQueuePressureShare": 0.12,
+    "marketableRestingPressureShare": 0.8,
+    "deepRestingPressureShare": 0.2,
+    "visibilityScale": 100,
+    "minResidualCash": 1,
+    "accountHeatPerStockHeat": 0.45,
+    "ignoreBelowPreviousCloseWhenPriceAbovePct": 4,
+    "visibleBookWindowPct": 0.018,
+    "softBookWindowPct": 0.08,
+    "nearBookVisibilityBase": 0.55,
+    "nearBookVisibilityFade": 0.3,
+    "nearBookVisibilityMin": 0.25,
+    "farBookVisibilityMax": 0.25
+  },
+  "institution": {
+    "neutralFinancialHealth": 50,
+    "presenceScale": 100,
+    "biasPressureUnit": 16000,
+    "overrun": {
+      "valuationThreshold": 0.18,
+      "valuationWeight": 0.11,
+      "return10dThreshold": 28,
+      "return10dWeight": 0.0018,
+      "ma5DeviationThreshold": 7,
+      "ma5DeviationWeight": 0.0022,
+      "openToNowPctThreshold": 2.5,
+      "openToNowPctWeight": 0.004
+    },
+    "discountSupport": {
+      "undervaluationThreshold": 0.08,
+      "healthyFinancialHealth": 55,
+      "healthyWeight": 0.04,
+      "fragileWeight": 0.018
+    },
+    "overvaluationBrake": {
+      "scale": 1.9,
+      "min": 0.02,
+      "max": 1
+    }
+  },
+  "marketDepth": {
+    "minLevelCount": 8,
+    "maxLevelCount": 120,
+    "minEffectiveDepth": 500000,
+    "effectiveDepth": {
+      "capMultiplier": {
+        "small": 0.5,
+        "mid": 0.95,
+        "large": 2.65
+      },
+      "floatDepthRatio": {
+        "small": 0.008,
+        "mid": 0.006,
+        "large": 0.012
+      }
+    },
+    "book": {
+      "sealedLimitUpAskModifier": 0.08,
+      "weakSealAskModifier": 0.25,
+      "panicAskModifier": 1.75,
+      "sealedLimitUpBidModifier": 1.4,
+      "weakSealBidModifier": 0.82,
+      "panicBidModifier": 0.28,
+      "underBoardBidShare": 0.32,
+      "sealedUnderBoardBidShare": 0.18,
+      "overBoardAskShare": 0.32,
+      "limitDownOverBoardAskShare": 0.18
+    }
+  },
+  "board": {
+    "nearLimitUpProgress": 0.82,
+    "materialDropPctFloor": 2.5,
+    "materialDropLimitScale": 0.34,
+    "severeDropPctFloor": 4,
+    "severeDropLimitScale": 0.52,
+    "fearSnowballThreshold": 62,
+    "panicSellerSnowballThreshold": 54,
+    "sellImbalanceMultiple": 2.25,
+    "largeCapBoardBrake": 1.9,
+    "midCapBoardBrake": 1.18,
+    "smallCapBoardBrake": 1,
+    "queueDepthBase": 0.075,
+    "queueDepthConvictionWeight": 0.075,
+    "sealConvictionLarge": 0.36,
+    "sealConvictionDefault": 0.24,
+    "sealPressureMultipleLarge": 2.25,
+    "sealPressureMultipleDefault": 1.6,
+    "sealedStrengthLarge": 76,
+    "sealedStrengthDefault": 66,
+    "weakSealStrength": 36,
+    "lockedBoard": {
+      "queueMinLiquidityShare": 0.12,
+      "queueBufferWeight": 0.62,
+      "unlockPressureMultiple": 1.08,
+      "limitOpenQueueShare": 0.3
+    },
+    "queueLedger": {
+      "emptyQuality": 0.35,
+      "fallbackQuality": 0.48,
+      "qualityMin": 0.08,
+      "qualityMax": 1,
+      "consumeQualityPenalty": 0.18,
+      "passiveDecayQualityPenalty": 0.08,
+      "lockedTickQualityBonus": 0.012,
+      "openedTickQualityPenalty": 0.045,
+      "qualityBufferMin": 0.58,
+      "qualityBufferMax": 1.22,
+      "sourceQuality": {
+        "player": 0.78,
+        "whale": 0.84,
+        "institution": 0.76,
+        "quant": 0.52,
+        "retail": 0.36,
+        "shrimp": 0.42,
+        "fundamental": 0.72,
+        "news": 0.32,
+        "opening": 0.58,
+        "noise": 0.16,
+        "mixed": 0.48
+      }
+    }
+  },
+  "ambientTape": {
+    "baselineTickSeconds": 5,
+    "capFactor": {
+      "small": 0.82,
+      "mid": 1,
+      "large": 1.16
+    },
+    "attentionBase": 0.55,
+    "attentionScale": 130,
+    "institutionBase": 0.75,
+    "institutionScale": 180,
+    "volatilityBase": 0.75,
+    "volatilityScale": 150,
+    "passiveLiquidityShare": 0.0024,
+    "matchedStrategyShare": 0.18,
+    "aggressiveCrossShare": 0.026,
+    "churnMin": 0.72,
+    "churnMax": 1.28,
+    "capLiquidityShare": {
+      "small": 0.095,
+      "mid": 0.075,
+      "large": 0.06
+    }
+  },
+  "openingAuction": {
+    "phaseTicks": 3,
+    "moodShockMin": -5.5,
+    "moodShockMax": 5.5,
+    "sectorMomentumScale": 3,
+    "randomGapWideMin": -0.95,
+    "randomGapWideMax": 0.95,
+    "randomGapNarrowMin": -0.55,
+    "randomGapNarrowMax": 0.55,
+    "trendContinuationWeight": 0.08,
+    "trendContinuationMin": -1.4,
+    "trendContinuationMax": 1.4,
+    "richValuationThreshold": 0.38,
+    "richFatigueRunThreshold": 8,
+    "richFatigueRunWeight": 1.25,
+    "richFatigueBaseWeight": 0.5,
+    "overrunFatigueThreshold": 2.5,
+    "overrunPositiveChance": 0.38,
+    "overrunPositiveMin": 0.08,
+    "overrunPositiveMax": 0.28,
+    "overrunNegativeMin": 0.08,
+    "overrunNegativeMax": 0.22,
+    "overrunDefaultWeight": -0.16,
+    "sealedLimitUpCarryMin": 0.25,
+    "sealedLimitUpCarryMax": 1.45,
+    "hotBoardCarryMin": -0.55,
+    "hotBoardCarryMax": 0.95,
+    "limitDownCarryMin": 0.7,
+    "limitDownCarryMax": 3.5,
+    "repeatLimitDownCarryMax": 2.2,
+    "panicCarryMin": 0.3,
+    "panicCarryMax": 1.8,
+    "repeatLimitDownReliefMin": -0.8,
+    "repeatLimitDownReliefMax": 1.8,
+    "repeatLimitDownDrawdownThreshold": 16,
+    "repeatLimitDownDrawdownWeight": 0.035,
+    "limitContinuation": {
+      "hotSectorMomentumThreshold": 8,
+      "hotAttentionThreshold": 68,
+      "sealedLimitUpChance": 0.45,
+      "sealedLimitUpMinLimitShare": 0.75,
+      "sealedLimitUpMaxLimitShare": 1.25,
+      "hotBoardChance": 0.2,
+      "hotBoardMinLimitShare": 0.45,
+      "hotBoardMaxLimitShare": 0.95,
+      "limitDownChance": 0.28,
+      "limitDownMinLimitShare": 0.55,
+      "limitDownMaxLimitShare": 1.1
+    },
+    "moodShockGapWeight": 0.09,
+    "washoutLimitDownGapWeight": -0.03,
+    "washoutDefaultGapWeight": 0.08,
+    "richFatigueGapWeight": 0.55,
+    "minimumGapAbs": 0.18,
+    "minimumGapRandomMax": 0.46,
+    "attentionPerGapPct": 0.72,
+    "heatPerGapPct": 0.32,
+    "sentimentPerGapPct": 0.32,
+    "greedPerPositiveGapPct": 0.82,
+    "boardFaithPerPositiveGapPct": 0.48,
+    "fearPerNegativeGapPct": 1.4,
+    "panicSellersPerNegativeGapPct": 0.72,
+    "dipBuyersPerNegativeGapPct": 0.65,
+    "flowMemoryPerGapPct": 4.8,
+    "flowMemoryMin": -28,
+    "flowMemoryMax": 28,
+    "shockMemoryPerGapPct": 8.5,
+    "shockMemoryMin": -45,
+    "shockMemoryMax": 45,
+    "eventGapThresholdPct": 1.4
+  },
+  "dailyCircumstance": {
+    "moodShockMin": -5.5,
+    "moodShockMax": 5.5,
+    "sectorMomentumScale": 3,
+    "liquidityShockMin": -0.16,
+    "liquidityShockMax": 0.18,
+    "liquidityShockCap": 0.12,
+    "liquidityShockCloseMoveDivisor": 80,
+    "liquidityShockVolatilityDivisor": 160,
+    "attention": {
+      "moodShockWeight": 0.65,
+      "washoutWeight": 1,
+      "closeMoveWeight": 0.18
+    },
+    "sentiment": {
+      "moodShockWeight": 0.42,
+      "overrunFatigueWeight": 0.34,
+      "washoutWeight": 0.16
+    },
+    "heat": {
+      "moodShockWeight": 0.18,
+      "overrunFatigueWeight": 0.16,
+      "washoutWeight": 0.04
+    },
+    "greed": {
+      "moodShockWeight": 0.28,
+      "overrunFatigueWeight": 0.32,
+      "washoutWeight": 0.18
+    },
+    "dipBuyers": {
+      "washoutWeight": 0.42,
+      "closeMoveThreshold": 4,
+      "closeMoveWeight": 0.26,
+      "overrunFatigueWeight": 0.05
+    },
+    "fear": {
+      "moodShockWeight": 0.22,
+      "washoutWeight": 0.08,
+      "closeMoveThreshold": 4,
+      "closeMoveWeight": 0.16,
+      "overrunFatigueWeight": 0.22
+    },
+    "panicSellers": {
+      "washoutWeight": 0.04,
+      "closeMoveThreshold": 5,
+      "closeMoveWeight": 0.12,
+      "overrunFatigueWeight": 0.08
+    },
+    "drawdownCooling": {
+      "drawdownThreshold": 24,
+      "fearMax": 25,
+      "heatMultiplier": 0.72
+    },
+    "event": {
+      "moodShockThreshold": 4.4,
+      "overrunFatigueThreshold": 3,
+      "washoutAttentionThreshold": 3.2
+    }
+  },
+  "whale": {
+    "minimumOrderCash": 500000,
+    "minimumProbeOrderCash": 350000,
+    "minimumMarkupOrderCash": 750000,
+    "largeCashThreshold": 2000000,
+    "eventNotionalThreshold": 750000,
+    "pumpLord": {
+      "heatExitToleranceBuffer": 18,
+      "heatExitMaxLossPct": -0.035,
+      "heatExitGreedMin": 62,
+      "heatExitAttentionMin": 78,
+      "heatExitPlayerVisibilityMin": 20,
+      "heatExitDepthPct": 0.09
+    },
+    "opportunity": {
+      "nearBestRatio": 0.78,
+      "nearBestMinScore": 22,
+      "compellingScore": 42,
+      "nearBestChance": 0.18,
+      "compellingChance": 0.34
+    },
+    "cooldown": {
+      "minimumTicks": 2,
+      "patienceDivisor": 28,
+      "aggressionDivisor": 45,
+      "archetypeBase": {
+        "pumpLord": 4,
+        "quantKnife": 3,
+        "valueWall": 8,
+        "rescueWhale": 10,
+        "bagholderWhale": 5,
+        "sectorRotator": 6,
+        "liquidityVulture": 5
+      },
+      "intentionModifier": {
+        "accumulate": 2,
+        "pump": 1,
+        "defend": 1,
+        "attack": 1,
+        "dump": 2,
+        "rotate": 3,
+        "scoop": 2
+      }
+    },
+    "runnerExhaustion": {
+      "return5dThreshold": 9,
+      "return5dWeight": 1.28,
+      "return10dThreshold": 16,
+      "return10dWeight": 0.58,
+      "upStreakThreshold": 2,
+      "upStreakWeight": 5,
+      "greenDaysThreshold": 3,
+      "greenDaysWeight": 5,
+      "ma5DeviationThreshold": 5.5,
+      "ma5DeviationWeight": 1.4,
+      "openingGapThreshold": 2,
+      "openingGapWeight": 2.4,
+      "gapFadeOpeningThreshold": 0.7,
+      "gapFadeOpenToNowThreshold": 0.8,
+      "gapFadeWeight": 1.55,
+      "valuationThreshold": 0.3,
+      "valuationWeight": 32,
+      "holderCostPremium": 1.08,
+      "holderCostWeight": 34,
+      "smoothRunnerGreenDays": 4,
+      "smoothRunnerVolatilityMax": 3.2,
+      "smoothRunnerBonus": 8
+    }
+  },
+  "shrimp": {
+    "baselineTickSeconds": 5,
+    "narrativePressureWeight": 0.42,
+    "narrativeEffectWeight": 0.55,
+    "heatDeltaMax": 1.6,
+    "sentimentDeltaMin": -1.1,
+    "sentimentDeltaMax": 1.1,
+    "attentionDeltaMax": 1.6,
+    "narrativeNoteLimit": 3,
+    "pressureCap": {
+      "boardChaser": 2.05,
+      "panicCutter": 2.05,
+      "valueHolder": 1,
+      "default": 1.28,
+      "boardLockedBoost": 0.5,
+      "boardChaserBuyBoost": 0.45,
+      "panicCutterSellBoost": 0.55
+    },
+    "smallOrderBurst": {
+      "buyCapitalBase": 0.1,
+      "buyCapitalUrgency": 0.045,
+      "buyCapitalMax": 0.24,
+      "sellInventoryBase": 0.16,
+      "sellInventoryUrgency": 0.06,
+      "sellInventoryMax": 0.34,
+      "maxOrderCount": 320,
+      "minOrderShares": 100,
+      "orderSizeNoiseMin": 0.55,
+      "orderSizeNoiseMax": 1.75,
+      "countNoiseMin": 0.38,
+      "countNoiseMax": 1.82,
+      "countUrgencyWeight": 0.22,
+      "clusterChanceBase": 0.05,
+      "clusterChanceUrgencyWeight": 0.08,
+      "clusterChanceStressScale": 520,
+      "clusterChanceMax": 0.34,
+      "clusterMultiplierMin": 1.35,
+      "clusterMultiplierMax": 2.55,
+      "clusterMultiplierUrgencyWeight": 0.32,
+      "normalMultiplierMin": 0.68,
+      "normalMultiplierMax": 1.18,
+      "realizedIntentBase": 1.05,
+      "realizedIntentUrgencyWeight": 0.28
+    }
+  }
+}

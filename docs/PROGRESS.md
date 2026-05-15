@@ -4,7 +4,7 @@
 
 STONKS-WIP currently has a playable deterministic market core with both CLI and React inspection surfaces. The simulation advances through pre-market, opening auction, intraday trading, closing auction, and settlement across a 30-day run.
 
-The market contains eight fictional stocks across tech, biotech, property, consumer, resources, finance, defense, and energy. Each stock tracks price, previous close, open/high/low, liquidity, turnover, volume, valuation, retail emotion, board queues, board state, cost distribution, shrimp cohorts, quant presence, institution presence, intraday chart points, and daily candles.
+The market contains eight fictional stocks across tech, biotech, property, consumer, resources, finance, defense, and energy. Each stock tracks price, previous close, open/high/low, liquidity, turnover, volume, valuation, retail emotion, board queues, board queue source/quality, board state, cost distribution, shrimp cohorts, quant presence, institution presence, intraday chart points, and daily candles.
 
 ## Core Market Systems
 
@@ -14,6 +14,7 @@ The market contains eight fictional stocks across tech, biotech, property, consu
 - Player sells consume bid depth and respect sellable T+1 inventory.
 - Daily price limits use main, growth, and ST board ratios.
 - Board state machine recognizes loose trading, attacking limit-up, sealed limit-up, weak seals, broken boards, panic, and limit-down.
+- Board queues now have ledger accounting for source, quality, additions, consumption, locked ticks, and opening ticks.
 - Ambient tape creates volume/turnover even when no explicit player or whale trade prints.
 - Price engine combines residual pressure, execution shock, liquidity stress, flow memory, jitter, battle impulses, cascades, emotional breaks, and board queues.
 
@@ -36,6 +37,8 @@ Whale selection was changed so each whale ranks the whole tape before acting, in
 
 Daily settlement now applies deterministic stock-specific circumstance shocks to attention, sentiment, liquidity, heat, greed, fear, panic sellers, and dip buyers. Major setup changes produce `marketCircumstance` events.
 
+The latest consolidation pass added `src/simulation/boardQueueLedger.ts`. Board-engine queue changes, depth queue consumption, player upper-board support, opening-auction flat-board queues, and settlement queue resets now route through one ledger. This makes limit-board locks explainable as queue size plus queue quality instead of a hidden anti-ping-pong rule.
+
 ## Validation
 
 The current validation set covers:
@@ -57,6 +60,7 @@ The current validation set covers:
 - market memory derivation
 - history-aware whale exits
 - Red River Lithium avoiding a 20-day up-only staircase
+- limit-down pins staying flat while a real sell queue holds
 
 The latest known green checks are:
 

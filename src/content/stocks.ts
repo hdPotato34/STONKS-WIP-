@@ -2,6 +2,7 @@ import type { Stock, StockId } from "../game/types";
 import { deriveInitialFundamentals } from "../game/fundamentals";
 import { buildInitialDailyCandles } from "../game/charting";
 import { createInitialShrimpCohorts } from "./shrimpCohorts";
+import { deriveStockOptions } from "./stockOptions";
 
 type StockTemplate = Omit<
   Stock,
@@ -10,6 +11,8 @@ type StockTemplate = Omit<
   | "microPrice"
   | "microstructure"
   | "shrimpCohorts"
+  | "options"
+  | "boardQueueLedger"
   | "sharesOutstanding"
   | "fairPe"
   | "earningsPerShare"
@@ -850,6 +853,25 @@ export function createStocks(): Record<StockId, Stock> {
           liquidityStress: 0,
           shockMemory: 0,
           lastPrintSign: 0
+        },
+        options: deriveStockOptions(stock),
+        boardQueueLedger: {
+          buy: {
+            quality: 0,
+            dominantSource: "mixed",
+            addedNotional: 0,
+            consumedNotional: 0,
+            lockedTicks: 0,
+            openedTicks: 0
+          },
+          sell: {
+            quality: 0,
+            dominantSource: "mixed",
+            addedNotional: 0,
+            consumedNotional: 0,
+            lockedTicks: 0,
+            openedTicks: 0
+          }
         },
         shrimpCohorts: createInitialShrimpCohorts(stock),
         retail: { ...stock.retail },

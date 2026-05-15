@@ -1,5 +1,7 @@
 import { clamp, roundMoney } from "../game/config";
 import type { ShrimpCohort, ShrimpStrategy, Stock } from "../game/types";
+import marketBehavior from "../config/marketBehavior.json";
+import shrimpCohortConstitution from "../config/shrimpCohortConstitution.json";
 
 type StockForShrimp = Omit<
   Stock,
@@ -8,6 +10,8 @@ type StockForShrimp = Omit<
   | "microPrice"
   | "microstructure"
   | "shrimpCohorts"
+  | "options"
+  | "boardQueueLedger"
   | "sharesOutstanding"
   | "fairPe"
   | "earningsPerShare"
@@ -26,86 +30,126 @@ type CohortSeed = {
 };
 
 export function createInitialShrimpCohorts(stock: StockForShrimp): ShrimpCohort[] {
-  const speculativeTilt = clamp((stock.retail.gamblers + stock.retail.boardFaith + stock.attention - 95) / 135, 0, 1);
-  const valueTilt = clamp((stock.financialHealth + Math.max(0, 16 - stock.pe) * 4 + stock.institutionPresence - 95) / 145, 0, 1);
-  const trappedTilt = clamp((stock.retail.bagholders + stock.retail.panicSellers + stock.costDistribution.loss - 85) / 130, 0, 1);
-  const momentumTilt = clamp((stock.retail.momentum + stock.quantPresence + Math.abs(stock.momentum) - 70) / 135, 0, 1);
-  const smallCapBoost = stock.marketCap < 10_000_000_000 ? 1.18 : stock.marketCap > 50_000_000_000 ? 0.72 : 1;
-  const largeCapValueBoost = stock.marketCap > 50_000_000_000 ? 0.86 : 0.88;
+  const tilts = Object.fromEntries(Object.keys(shrimpCohortConstitution.tilts).map((tilt) => [tilt, calculateTilt(stock, tilt)]));
+  const capClass = getConstitutionCapClass(stock);
+  const capitalBaseConfig = shrimpCohortConstitution.capitalBase;
   const capitalBase =
     stock.baseLiquidity *
-    (1.8 + stock.attention / 80 + stock.retail.attention / 120 + stock.retail.bagholders / 180) *
-    (stock.marketCap > 50_000_000_000 ? 0.78 : 1);
+    (capitalBaseConfig.base +
+      stock.attention / capitalBaseConfig.attentionScale +
+      stock.retail.attention / capitalBaseConfig.retailAttentionScale +
+      stock.retail.bagholders / capitalBaseConfig.bagholderScale) *
+    shrimpCohortConstitution.capBoosts.capitalBase[capClass];
 
-  const seeds: CohortSeed[] = [
-    {
-      strategy: "boardChaser",
-      weight: (0.09 + speculativeTilt * 0.34) * smallCapBoost,
-      conviction: 42 + stock.retail.boardFaith * 0.38 + stock.retail.greed * 0.18,
-      activity: 34 + stock.attention * 0.28,
-      riskAppetite: 62 + stock.retail.gamblers * 0.32,
-      orderSize: stock.price < 8 ? 1_800 : 900,
-      inventoryRatio: 0.22 + speculativeTilt * 0.24
-    },
-    {
-      strategy: "momentumScalper",
-      weight: 0.14 + momentumTilt * 0.24,
-      conviction: 38 + stock.retail.momentum * 0.34,
-      activity: 44 + stock.quantPresence * 0.24,
-      riskAppetite: 48 + momentumTilt * 36,
-      orderSize: stock.price < 10 ? 1_200 : 500,
-      inventoryRatio: 0.18 + Math.max(0, stock.momentum) / 380
-    },
-    {
-      strategy: "dipBuyer",
-      weight: 0.14 + stock.retail.dipBuyers / 310 + valueTilt * 0.12,
-      conviction: 40 + stock.retail.dipBuyers * 0.32 + stock.financialHealth * 0.12,
-      activity: 30 + stock.retail.attention * 0.16,
-      riskAppetite: 38 + stock.retail.dipBuyers * 0.22,
-      orderSize: stock.price < 10 ? 1_500 : 600,
-      inventoryRatio: 0.24 + stock.costDistribution.loss / 220
-    },
-    {
-      strategy: "panicCutter",
-      weight: 0.1 + trappedTilt * 0.3,
-      conviction: 36 + stock.retail.fear * 0.24 + stock.retail.panicSellers * 0.28,
-      activity: 28 + stock.retail.panicSellers * 0.28,
-      riskAppetite: 18 + (100 - stock.retail.fear) * 0.22,
-      orderSize: stock.price < 10 ? 1_000 : 400,
-      inventoryRatio: 0.48 + stock.costDistribution.loss / 130 + stock.costDistribution.deepLoss / 120
-    },
-    {
-      strategy: "valueHolder",
-      weight: (0.11 + valueTilt * 0.36) * largeCapValueBoost,
-      conviction: 46 + stock.financialHealth * 0.34 + Math.max(0, 18 - stock.pe) * 1.5,
-      activity: 18 + stock.institutionPresence * 0.12,
-      riskAppetite: 22 + stock.financialHealth * 0.18,
-      orderSize: stock.price < 10 ? 3_000 : 1_000,
-      inventoryRatio: 0.62 + valueTilt * 0.24
-    },
-    {
-      strategy: "noiseTrader",
-      weight: 0.2 + stock.attention / 440,
-      conviction: 34 + stock.retail.attention * 0.16,
-      activity: 52 + stock.attention * 0.18,
-      riskAppetite: 42 + stock.retail.gamblers * 0.16,
-      orderSize: stock.price < 10 ? 500 : 200,
-      inventoryRatio: 0.26
-    }
-  ];
+  const seeds = Object.entries(shrimpCohortConstitution.strategies).map(([strategy, config]) =>
+    buildCohortSeed(stock, strategy as ShrimpStrategy, config, tilts, capClass)
+  );
 
   const totalWeight = seeds.reduce((total, seed) => total + seed.weight, 0);
   return seeds.map((seed) => {
-    const capital = roundMoney((capitalBase * seed.weight) / Math.max(0.01, totalWeight));
+    const capital = roundMoney((capitalBase * seed.weight) / Math.max(shrimpCohortConstitution.capitalWeightFloor, totalWeight));
     return {
       strategy: seed.strategy,
       capital,
-      inventoryNotional: roundMoney(capital * clamp(seed.inventoryRatio, 0.05, 0.92)),
+      inventoryNotional: roundMoney(capital * clamp(seed.inventoryRatio, shrimpCohortConstitution.inventoryRatioMin, shrimpCohortConstitution.inventoryRatioMax)),
       conviction: clamp(seed.conviction, 0, 100),
       activity: clamp(seed.activity, 0, 100),
       riskAppetite: clamp(seed.riskAppetite, 0, 100),
-      orderSize: Math.max(100, Math.round(seed.orderSize)),
+      orderSize: Math.max(shrimpCohortConstitution.minOrderSize, Math.round(seed.orderSize)),
       flowMemory: 0
     };
   });
+}
+
+function buildCohortSeed(
+  stock: StockForShrimp,
+  strategy: ShrimpStrategy,
+  config: (typeof shrimpCohortConstitution.strategies)[keyof typeof shrimpCohortConstitution.strategies],
+  tilts: Record<string, number>,
+  capClass: keyof typeof shrimpCohortConstitution.capBoosts.capitalBase
+): CohortSeed {
+  return {
+    strategy,
+    weight: calculateFormula(stock, config.weight, tilts) * getCapBoost("capBoost" in config.weight ? config.weight.capBoost : undefined, capClass),
+    conviction: calculateFormula(stock, config.conviction, tilts),
+    activity: calculateFormula(stock, config.activity, tilts),
+    riskAppetite: calculateFormula(stock, config.riskAppetite, tilts),
+    orderSize: stock.price < config.orderSize.priceThreshold ? config.orderSize.below : config.orderSize.default,
+    inventoryRatio: calculateFormula(stock, config.inventoryRatio, tilts)
+  };
+}
+
+function calculateTilt(stock: StockForShrimp, tiltName: string): number {
+  const tilt = shrimpCohortConstitution.tilts[tiltName as keyof typeof shrimpCohortConstitution.tilts];
+  return clamp((calculateFeatureSum(stock, tilt.features) - tilt.offset) / tilt.scale, 0, 1);
+}
+
+function calculateFormula(
+  stock: StockForShrimp,
+  formula: { base: number; tilt?: string; tiltWeight?: number; features?: Record<string, number> },
+  tilts: Record<string, number>
+): number {
+  return formula.base + (formula.tilt ? (tilts[formula.tilt] ?? 0) * (formula.tiltWeight ?? 0) : 0) + calculateFeatureSum(stock, formula.features ?? {});
+}
+
+function calculateFeatureSum(stock: StockForShrimp, features: Record<string, number>): number {
+  return Object.entries(features).reduce((total, [feature, weight]) => total + getFeatureValue(stock, feature) * weight, 0);
+}
+
+function getFeatureValue(stock: StockForShrimp, feature: string): number {
+  switch (feature) {
+    case "attention":
+      return stock.attention;
+    case "absMomentum":
+      return Math.abs(stock.momentum);
+    case "positiveMomentum":
+      return Math.max(0, stock.momentum);
+    case "financialHealth":
+      return stock.financialHealth;
+    case "institutionPresence":
+      return stock.institutionPresence;
+    case "quantPresence":
+      return stock.quantPresence;
+    case "peDiscount16":
+      return Math.max(0, 16 - stock.pe);
+    case "peDiscount18":
+      return Math.max(0, 18 - stock.pe);
+    case "inverseRetailFear":
+      return 100 - stock.retail.fear;
+    case "retail.attention":
+      return stock.retail.attention;
+    case "retail.bagholders":
+      return stock.retail.bagholders;
+    case "retail.boardFaith":
+      return stock.retail.boardFaith;
+    case "retail.dipBuyers":
+      return stock.retail.dipBuyers;
+    case "retail.fear":
+      return stock.retail.fear;
+    case "retail.gamblers":
+      return stock.retail.gamblers;
+    case "retail.greed":
+      return stock.retail.greed;
+    case "retail.momentum":
+      return stock.retail.momentum;
+    case "retail.panicSellers":
+      return stock.retail.panicSellers;
+    case "cost.deepLoss":
+      return stock.costDistribution.deepLoss;
+    case "cost.loss":
+      return stock.costDistribution.loss;
+    default:
+      return 0;
+  }
+}
+
+function getConstitutionCapClass(stock: StockForShrimp): "small" | "mid" | "large" {
+  if (stock.marketCap < marketBehavior.marketCap.smallMax) return "small";
+  if (stock.marketCap <= marketBehavior.marketCap.midMax) return "mid";
+  return "large";
+}
+
+function getCapBoost(boostName: string | undefined, capClass: "small" | "mid" | "large"): number {
+  if (!boostName) return 1;
+  return shrimpCohortConstitution.capBoosts[boostName as keyof typeof shrimpCohortConstitution.capBoosts][capClass];
 }

@@ -4,6 +4,10 @@ import { recordBuyFill, recordSellFill } from "./portfolio";
 import { executeBuyFromDepth, executeSellIntoDepth } from "../simulation/marketDepth";
 import { applyExecutionPrice } from "../simulation/priceEngine";
 import { getUpperLimit } from "../simulation/boardEngine";
+import { addBoardQueue } from "../simulation/boardQueueLedger";
+import { MARKET_BEHAVIOR_CONFIG } from "../simulation/marketBehaviorConfig";
+
+const playerOrderConfig = MARKET_BEHAVIOR_CONFIG.playerOrders;
 
 export type AppliedPlayerPressure = {
   stockId: string;
@@ -64,9 +68,9 @@ function queueNewPlayerOrders(game: GameState, stock: Stock, actions: PlayerActi
       style: "restingBuy",
       amountCash: reservedCash,
       limitPrice: action.limitPrice,
-      remainingTicks: 5,
+      remainingTicks: playerOrderConfig.defaultRestingBuyTicks,
       visibility: calculateRestingBuyVisibility(stock, reservedCash, action.limitPrice),
-      heatImpact: calculateRestingBuyVisibility(stock, reservedCash, action.limitPrice) * 0.12,
+      heatImpact: calculateRestingBuyVisibility(stock, reservedCash, action.limitPrice) * playerOrderConfig.heatImpactPerVisibility,
       createdDay: game.day,
       createdTick: game.tick
     };
@@ -108,7 +112,7 @@ function processActiveBuyOrders(
       recordBuyFill(game, stock, fill.filledShares, fill.filledNotional);
       applied.fills.push(fill);
       applied.buyPressure += fill.filledNotional;
-      addHeat(game, stock, calculateVisibility(stock, fill.filledNotional) * 0.12);
+      addHeat(game, stock, calculateVisibility(stock, fill.filledNotional) * playerOrderConfig.heatImpactPerVisibility);
       game.eventLog.push({
         day: game.day,
         tick: game.tick,
@@ -121,24 +125,24 @@ function processActiveBuyOrders(
     }
 
     const remainingCash = roundMoney(fill.unfilledCash);
-    if (remainingCash <= 1) continue;
+    if (remainingCash <= playerOrderConfig.minResidualCash) continue;
 
     order.amountCash = remainingCash;
     order.visibility = calculateRestingBuyVisibility(stock, remainingCash, order.limitPrice);
-    order.heatImpact = order.visibility * 0.12;
-    addHeat(game, stock, order.heatImpact * 0.35);
+    order.heatImpact = order.visibility * playerOrderConfig.heatImpactPerVisibility;
+    addHeat(game, stock, order.heatImpact * playerOrderConfig.restingHeatTickShare);
     applied.visibility = Math.max(applied.visibility, order.visibility);
 
     if (stock.price >= getUpperLimit(stock) && canJoinUpperQueue(stock, order)) {
       if (order.style !== "support") {
-        stock.buyQueue += remainingCash;
+        addBoardQueue(stock, "buy", remainingCash, { player: remainingCash });
         order.style = "support";
       }
-      applied.buyPressure += remainingCash * 0.12;
+      applied.buyPressure += remainingCash * playerOrderConfig.upperQueuePressureShare;
     } else {
       const marketableInterest = order.limitPrice === undefined || order.limitPrice >= stock.price;
       applied.buyPressure += marketableInterest
-        ? remainingCash * 0.8
+        ? remainingCash * playerOrderConfig.marketableRestingPressureShare
         : remainingCash * getDeepRestingBuyPressureWeight(stock, order.limitPrice);
     }
 
@@ -187,7 +191,7 @@ function processImmediateSellActions(
     applied.fills.push(fill);
     applied.sellPressure += fill.filledNotional;
     applied.visibility = Math.max(applied.visibility, calculateVisibility(stock, fill.filledNotional));
-    addHeat(game, stock, calculateVisibility(stock, fill.filledNotional) * 0.14);
+    addHeat(game, stock, calculateVisibility(stock, fill.filledNotional) * playerOrderConfig.sellHeatImpactPerVisibility);
 
     game.eventLog.push({
       day: game.day,
@@ -203,7 +207,7 @@ function processImmediateSellActions(
 
 function calculateVisibility(stock: Stock, notional: number): number {
   if (notional <= 0) return 0;
-  return clamp((notional / Math.max(1, stock.currentLiquidity)) * 100, 0, 100);
+  return clamp((notional / Math.max(1, stock.currentLiquidity)) * playerOrderConfig.visibilityScale, 0, 100);
 }
 
 export function calculateRestingBuyVisibility(stock: Stock, notional: number, limitPrice?: number): number {
@@ -211,27 +215,36 @@ export function calculateRestingBuyVisibility(stock: Stock, notional: number, li
 }
 
 function getDeepRestingBuyPressureWeight(stock: Stock, limitPrice?: number): number {
-  if (limitPrice === undefined || limitPrice >= stock.price) return 0.8;
-  return 0.2 * getBuyOrderProximityWeight(stock, limitPrice);
+  if (limitPrice === undefined || limitPrice >= stock.price) return playerOrderConfig.marketableRestingPressureShare;
+  return playerOrderConfig.deepRestingPressureShare * getBuyOrderProximityWeight(stock, limitPrice);
 }
 
 function getBuyOrderProximityWeight(stock: Stock, limitPrice?: number): number {
   if (limitPrice === undefined || limitPrice >= stock.price) return 1;
   if (limitPrice <= 0) return 0;
-  if (limitPrice <= stock.previousClose && stock.price >= stock.previousClose * 1.04) return 0;
+  if (
+    limitPrice <= stock.previousClose &&
+    stock.price >= stock.previousClose * (1 + playerOrderConfig.ignoreBelowPreviousCloseWhenPriceAbovePct / MARKET_BEHAVIOR_CONFIG.units.percentScale)
+  ) {
+    return 0;
+  }
 
   const distancePct = (stock.price - limitPrice) / Math.max(0.01, stock.price);
   if (distancePct <= 0) return 1;
 
-  const visibleBookWindow = 0.018;
-  const softBookWindow = 0.08;
+  const visibleBookWindow = playerOrderConfig.visibleBookWindowPct;
+  const softBookWindow = playerOrderConfig.softBookWindowPct;
   if (distancePct <= visibleBookWindow) {
-    return clamp(0.55 - distancePct / visibleBookWindow * 0.3, 0.25, 0.55);
+    return clamp(
+      playerOrderConfig.nearBookVisibilityBase - (distancePct / visibleBookWindow) * playerOrderConfig.nearBookVisibilityFade,
+      playerOrderConfig.nearBookVisibilityMin,
+      playerOrderConfig.nearBookVisibilityBase
+    );
   }
   if (distancePct >= softBookWindow) return 0;
 
   const fade = 1 - (distancePct - visibleBookWindow) / (softBookWindow - visibleBookWindow);
-  return clamp(Math.pow(fade, 2) * 0.25, 0, 0.25);
+  return clamp(Math.pow(fade, 2) * playerOrderConfig.farBookVisibilityMax, 0, playerOrderConfig.farBookVisibilityMax);
 }
 
 function canJoinUpperQueue(stock: Stock, order: Order): boolean {
@@ -240,5 +253,5 @@ function canJoinUpperQueue(stock: Stock, order: Order): boolean {
 
 function addHeat(game: GameState, stock: Stock, heat: number): void {
   stock.heat = clamp(stock.heat + heat, 0, 100);
-  game.player.accountHeat = clamp(game.player.accountHeat + heat * 0.45, 0, 100);
+  game.player.accountHeat = clamp(game.player.accountHeat + heat * playerOrderConfig.accountHeatPerStockHeat, 0, 100);
 }

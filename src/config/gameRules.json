@@ -1,0 +1,16 @@
+{
+  "totalDays": 30,
+  "dayDurationSeconds": 300,
+  "ticksPerDay": 300,
+  "tickDurationSeconds": 1,
+  "startingCash": 1000000000,
+  "targetNetWorth": 2500000000,
+  "stockCount": 16,
+  "boardLimits": {
+    "main": 0.1,
+    "growth": 0.2,
+    "st": 0.05
+  },
+  "maxAccountHeat": 100,
+  "maxStockHeat": 100
+}

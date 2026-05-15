@@ -92,6 +92,15 @@ export type CostDistribution = {
   deepLoss: number;
 };
 
+export type StockOptionProfile = {
+  marketCapClass: MarketCapClass;
+  liquidityTier: "thin" | "normal" | "deep";
+  speculationTier: "low" | "medium" | "high";
+  qualityTier: "distressed" | "ordinary" | "quality";
+  valuationStyle: "deepValue" | "fair" | "expensive" | "story";
+  behaviorTags: string[];
+};
+
 export type TickPrice = {
   day: number;
   tick: number;
@@ -136,6 +145,33 @@ export type ShrimpCohort = {
   flowMemory: number;
 };
 
+export type BoardQueueSource =
+  | "player"
+  | "whale"
+  | "institution"
+  | "quant"
+  | "retail"
+  | "shrimp"
+  | "fundamental"
+  | "news"
+  | "opening"
+  | "noise"
+  | "mixed";
+
+export type BoardQueueSideLedger = {
+  quality: number;
+  dominantSource: BoardQueueSource;
+  addedNotional: number;
+  consumedNotional: number;
+  lockedTicks: number;
+  openedTicks: number;
+};
+
+export type BoardQueueLedger = {
+  buy: BoardQueueSideLedger;
+  sell: BoardQueueSideLedger;
+};
+
 export type Stock = {
   id: StockId;
   name: string;
@@ -172,6 +208,7 @@ export type Stock = {
 
   buyQueue: number;
   sellQueue: number;
+  boardQueueLedger: BoardQueueLedger;
   boardStrength: number;
   boardState: BoardState;
 
@@ -182,6 +219,7 @@ export type Stock = {
 
   avgHolderCost: number;
   costDistribution: CostDistribution;
+  options: StockOptionProfile;
   activeModifiers: Modifier[];
   chart: TickPrice[];
   dailyCandles: DailyCandle[];
@@ -438,6 +476,7 @@ export type StockTickTrace = {
   boardState: BoardState;
   buyQueue: number;
   sellQueue: number;
+  boardQueueLedger: BoardQueueLedger;
   boardStrength: number;
   currentLiquidity: number;
   effectiveDepth: number;
